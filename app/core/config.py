@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # Inteligencia artificial (Gemini) — CU29/CU30/CU32
     gemini_api_key: str = ""
 
+    # Firebase Cloud Messaging (push) — CU14/CU15, solo resultado de
+    # sincronizar reservas/ventas offline. En local se usa el archivo
+    # (firebase_credentials_path); en Render conviene pegar el JSON entero
+    # en la variable FIREBASE_CREDENTIALS_JSON (no hay disco persistente).
+    firebase_credentials_path: str = "firebase-service-account.json"
+    firebase_credentials_json: str = ""
+
     @property
     def sqlalchemy_url(self) -> str:
         """SQLAlchemy necesita el driver explícito. Neon entrega 'postgresql://',

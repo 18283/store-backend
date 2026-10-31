@@ -56,3 +56,8 @@ class Usuario(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc)
     )
     activo: bool = Field(default=True)
+
+    # Tarjeta guardada (CU12/CU14): permite cobrar sin que el cliente esté
+    # presente, recién cuando el dispositivo offline recupera conexión.
+    stripe_customer_id: str | None = Field(default=None, max_length=255)
+    stripe_payment_method_id: str | None = Field(default=None, max_length=255)

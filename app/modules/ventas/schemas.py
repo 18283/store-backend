@@ -103,6 +103,17 @@ class EstadoPagoOut(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+#  CU12/CU14 — Tarjeta guardada, para cobrar ventas offline sin conexión
+# --------------------------------------------------------------------------- #
+class TarjetaIniciarOut(BaseModel):
+    checkout_url: str
+
+
+class TarjetaEstadoOut(BaseModel):
+    tiene_tarjeta_guardada: bool
+
+
+# --------------------------------------------------------------------------- #
 #  CU24/25/26 — Venta presencial, pago en caja, comprobante (rol Cajero)
 # --------------------------------------------------------------------------- #
 class ClienteBuscarOut(BaseModel):

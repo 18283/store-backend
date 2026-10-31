@@ -55,12 +55,21 @@ class EstadoPago:
     PROCESANDO = "PROCESANDO"
     APROBADO = "APROBADO"
     RECHAZADO = "RECHAZADO"
+    # CU14: se cobró (off-session, tarjeta guardada) pero al sincronizar ya
+    # no había stock — se le devolvió el dinero al cliente.
+    REEMBOLSADO = "REEMBOLSADO"
 
 
 class MetodoPago:
     STRIPE = "STRIPE"  # CU27 — pago web/QR
+    STRIPE_GUARDADA = "STRIPE_GUARDADA"  # CU12 — venta offline, tarjeta guardada
     EFECTIVO = "EFECTIVO"  # CU25 (futuro, venta presencial)
     TARJETA_CAJA = "TARJETA_CAJA"  # CU25 (futuro, venta presencial)
+
+
+class OrigenVenta:
+    ONLINE = "ONLINE"
+    OFFLINE = "OFFLINE"
 
 
 class Venta(SQLModel, table=True):
@@ -81,6 +90,9 @@ class Venta(SQLModel, table=True):
     # del sistema. Ventas en caja y ventas antiguas quedan en NULL.
     direccion_entrega: str | None = Field(default=None, max_length=200)
     referencia_entrega: str | None = Field(default=None, max_length=150)
+
+    # CU12: si nació de una venta de contado registrada sin conexión.
+    origen: str = Field(default=OrigenVenta.ONLINE, max_length=20)
 
     estado: str = Field(default=EstadoVenta.PENDIENTE_PAGO, max_length=20)
     total: Decimal = Field(max_digits=10, decimal_places=2)
@@ -123,6 +135,10 @@ class Pago(SQLModel, table=True):
 
     stripe_session_id: str | None = Field(default=None, max_length=255)
     stripe_payment_intent_id: str | None = Field(default=None, max_length=255)
+
+    # CU14: si este pago se revirtió por conflicto de stock al sincronizar.
+    stripe_refund_id: str | None = Field(default=None, max_length=255)
+    fecha_reembolso: datetime | None = Field(default=None)
 
     # Solo para CU25 (pago en caja, método EFECTIVO): lo que puso el
     # cliente y el vuelto calculado. Quedan en None para STRIPE/TARJETA_CAJA.

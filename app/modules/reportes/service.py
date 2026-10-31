@@ -16,7 +16,7 @@ from app.modules.ia.models import FormatoSolicitud, ReporteGenerado, TipoReporte
 from app.modules.inventario.models import Inventario
 from app.modules.productos.models import Producto, ProductoVariante
 from app.modules.sucursales.models import Sucursal
-from app.modules.ventas.models import EstadoVenta, Venta, VentaDetalle
+from app.modules.ventas.models import EstadoPago, EstadoVenta, Pago, Venta, VentaDetalle
 
 ESTADOS_PAGADOS = (EstadoVenta.PAGADA, EstadoVenta.COMPLETADA)
 _BOLIVIA = timezone(timedelta(hours=-4))
@@ -146,6 +146,30 @@ def reporte_ventas(
         prod["unidades"] += cantidad
         prod["ingresos"] += subtotal
 
+    # CU14: egresos por ventas offline cobradas y después reembolsadas por
+    # falta de stock al sincronizar (no tienen VentaDetalle, así que no
+    # aparecen arriba como ingreso).
+    reembolsos_query = (
+        select(Pago.monto, Venta.sucursal_id)
+        .select_from(Pago)
+        .join(Venta, Venta.id == Pago.venta_id)
+        .where(
+            Pago.estado == EstadoPago.REEMBOLSADO,
+            Pago.fecha_reembolso >= desde_dt,
+            Pago.fecha_reembolso <= hasta_dt,
+        )
+    )
+    if sucursal_id is not None:
+        reembolsos_query = reembolsos_query.where(Venta.sucursal_id == sucursal_id)
+    if empresa_id is not None:
+        reembolsos_query = reembolsos_query.where(
+            Venta.sucursal_id.in_(
+                select(Sucursal.id).where(Sucursal.empresa_id == empresa_id)
+            )
+        )
+    filas_reembolso = session.exec(reembolsos_query).all()
+    egresos_reembolsos = sum((monto for monto, _ in filas_reembolso), Decimal(0))
+
     cantidad_ventas = len(ventas)
     resultado = {
         "fecha_desde": desde,
@@ -159,6 +183,8 @@ def reporte_ventas(
         "descuentos": _dinero(descuentos),
         "ticket_promedio": _dinero(ingresos / cantidad_ventas) if cantidad_ventas else Decimal("0.00"),
         "lineas_sin_costo": lineas_sin_costo,
+        "egresos_reembolsos": _dinero(egresos_reembolsos),
+        "cantidad_reembolsos": len(filas_reembolso),
         "por_sucursal": sorted(
             (
                 {

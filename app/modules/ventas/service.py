@@ -428,6 +428,55 @@ def crear_checkout(session: Session, cliente_id: int, data: CheckoutCreate) -> d
     return _venta_out(session, venta)
 
 
+# --------------------------------------------------------------------------- #
+#  CU12/CU14 — Tarjeta guardada (cobro offline sin que el cliente esté presente)
+# --------------------------------------------------------------------------- #
+def iniciar_guardar_tarjeta(session: Session, usuario: Usuario) -> dict:
+    if usuario.stripe_customer_id is None:
+        customer_id = stripe_client.crear_customer(
+            email=usuario.email, nombre=f"{usuario.nombre} {usuario.apellido}"
+        )
+        usuario.stripe_customer_id = customer_id
+        session.add(usuario)
+        session.commit()
+        session.refresh(usuario)
+
+    base = settings.frontend_url.rstrip("/")
+    stripe_session = stripe_client.crear_setup_session(
+        customer_id=usuario.stripe_customer_id,
+        success_url=f"{base}/mi-cuenta?tarjeta=exito",
+        cancel_url=f"{base}/mi-cuenta?tarjeta=cancelado",
+    )
+    return {"checkout_url": stripe_session.url}
+
+
+def confirmar_tarjeta_guardada(session: Session, usuario: Usuario) -> dict:
+    if usuario.stripe_customer_id is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Todavía no iniciaste el guardado de una tarjeta"
+        )
+    exitoso = stripe_client.ultimo_setup_intent_exitoso(usuario.stripe_customer_id)
+    if exitoso is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Todavía no se confirmó el guardado de la tarjeta"
+        )
+    usuario.stripe_payment_method_id = exitoso.payment_method
+    session.add(usuario)
+    session.commit()
+    return {"tiene_tarjeta_guardada": True}
+
+
+def estado_tarjeta_guardada(usuario: Usuario) -> dict:
+    return {"tiene_tarjeta_guardada": usuario.stripe_payment_method_id is not None}
+
+
+def eliminar_tarjeta_guardada(session: Session, usuario: Usuario) -> dict:
+    usuario.stripe_payment_method_id = None
+    session.add(usuario)
+    session.commit()
+    return {"tiene_tarjeta_guardada": False}
+
+
 def mis_ventas(session: Session, cliente_id: int) -> list[dict]:
     ventas = session.exec(
         select(Venta)

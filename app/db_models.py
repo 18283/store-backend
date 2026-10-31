@@ -8,6 +8,7 @@ from app.modules.catalogo import models as catalogo  # noqa: F401
 from app.modules.ia import models as ia  # noqa: F401
 from app.modules.identidad import models as identidad  # noqa: F401
 from app.modules.inventario import models as inventario  # noqa: F401
+from app.modules.offline import models as offline  # noqa: F401
 from app.modules.productos import models as productos  # noqa: F401
 from app.modules.promociones import models as promociones  # noqa: F401
 from app.modules.proveedores import models as proveedores  # noqa: F401

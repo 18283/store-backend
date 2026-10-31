@@ -31,6 +31,9 @@ class ReporteVentasOut(BaseModel):
     descuentos: Decimal
     ticket_promedio: Decimal
     lineas_sin_costo: int
+    # CU14: dinero cobrado offline y devuelto por falta de stock al sincronizar.
+    egresos_reembolsos: Decimal
+    cantidad_reembolsos: int
     por_sucursal: list[SucursalVentasOut]
     top_productos: list[ProductoVendidoOut]
 

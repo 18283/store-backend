@@ -16,6 +16,8 @@ from app.modules.ventas.schemas import (
     EstadoPagoOut,
     PagoCajaCreate,
     PagoOut,
+    TarjetaEstadoOut,
+    TarjetaIniciarOut,
     VentaAdminPage,
     VentaCajaOut,
     VentaOut,
@@ -72,6 +74,29 @@ def iniciar_pago(venta_id: int, session: SessionDep, user: ClienteUser):  # CU27
 @router.get("/{venta_id}/pagos/estado", response_model=EstadoPagoOut)
 def estado_pago(venta_id: int, session: SessionDep, user: ClienteUser):  # CU28
     return service.consultar_estado_pago(session, user.id, venta_id)
+
+
+# --------------------------------------------------------------------------- #
+#  CU12/CU14 — Tarjeta guardada (necesaria para comprar sin conexión)
+# --------------------------------------------------------------------------- #
+@router.post("/tarjeta/iniciar", response_model=TarjetaIniciarOut)
+def iniciar_guardar_tarjeta(session: SessionDep, user: ClienteUser):
+    return service.iniciar_guardar_tarjeta(session, user)
+
+
+@router.post("/tarjeta/confirmar", response_model=TarjetaEstadoOut)
+def confirmar_tarjeta_guardada(session: SessionDep, user: ClienteUser):
+    return service.confirmar_tarjeta_guardada(session, user)
+
+
+@router.get("/tarjeta", response_model=TarjetaEstadoOut)
+def estado_tarjeta_guardada(user: ClienteUser):
+    return service.estado_tarjeta_guardada(user)
+
+
+@router.delete("/tarjeta", response_model=TarjetaEstadoOut)
+def eliminar_tarjeta_guardada(session: SessionDep, user: ClienteUser):
+    return service.eliminar_tarjeta_guardada(session, user)
 
 
 # --------------------------------------------------------------------------- #
