@@ -436,7 +436,14 @@ def finalizar_reserva(
 ) -> dict:
     """El cliente ya se probó las prendas: el Encargado indica cuántas unidades
     de cada una se lleva. Lo que devuelve vuelve al stock disponible; lo que se
-    lleva genera una venta pendiente que el Cajero cobra en caja."""
+    lleva genera una venta pendiente que el Cajero cobra en caja.
+
+    CU17 — si el cliente quiere otra talla/color de la misma prenda, el
+    Encargado puede indicar una `variante_sustituta_id`: se libera entera la
+    variante reservada (vuelve a disponible) y se descuenta la sustituta en
+    su lugar, con el precio de ESA variante (si cuesta más, el total de la
+    venta pendiente ya sale recalculado; como la venta todavía no se cobró,
+    no hace falta ningún reembolso acá)."""
     reserva = _reserva_de_sucursal(
         session, reserva_id, sucursal_permitida, empresa_id
     )
@@ -450,15 +457,23 @@ def finalizar_reserva(
         select(ReservaDetalle).where(ReservaDetalle.reserva_id == reserva.id)
     ).all()
     por_id = {d.id: d for d in detalles}
-    llevadas = {i.detalle_id: i.cantidad_llevada for i in data.items}
-    if len(llevadas) != len(data.items) or set(llevadas) != set(por_id):
+    items_por_id = {i.detalle_id: i for i in data.items}
+    if len(items_por_id) != len(data.items) or set(items_por_id) != set(por_id):
         raise HTTPException(422, "Indicá qué pasa con cada prenda de la reserva")
-    for detalle_id, cantidad in llevadas.items():
-        if cantidad > por_id[detalle_id].cantidad:
+    for detalle_id, item in items_por_id.items():
+        if item.cantidad_llevada > por_id[detalle_id].cantidad:
             raise HTTPException(422, "No se puede llevar más de lo que se reservó")
+        if item.variante_sustituta_id is not None and item.cantidad_llevada == 0:
+            raise HTTPException(422, "Si no se lleva nada, no corresponde elegir otra talla")
 
     inventarios: dict[int, Inventario | None] = {}
+    # Variante/inventario/precio EFECTIVOS que se venden por cada detalle:
+    # puede ser la reservada original, o la sustituta elegida (CU17).
+    variantes_venta: dict[int, ProductoVariante] = {}
+    inventarios_venta: dict[int, Inventario] = {}
     precios: dict[int, tuple[Decimal, Decimal, int | None]] = {}
+    es_sustitucion: dict[int, bool] = {}
+
     for d in detalles:
         inventarios[d.id] = session.exec(
             select(Inventario).where(
@@ -466,20 +481,60 @@ def finalizar_reserva(
                 Inventario.sucursal_id == reserva.sucursal_id,
             )
         ).first()
-        if llevadas[d.id] > 0:
-            variante = session.get(ProductoVariante, d.variante_id)
-            producto = session.get(Producto, variante.producto_id) if variante else None
-            original = None
-            if variante is not None and producto is not None:
-                original = (
-                    variante.precio if variante.precio is not None else producto.precio_base
-                )
-            if original is None:
-                raise HTTPException(
-                    422, "Una de las prendas que se lleva no tiene precio de venta"
-                )
-            precios[d.id] = ventas_service._precio_venta(session, variante, producto)
 
+        item = items_por_id[d.id]
+        if item.cantidad_llevada == 0:
+            continue
+
+        sustituta_id = item.variante_sustituta_id
+        es_sustitucion[d.id] = sustituta_id is not None and sustituta_id != d.variante_id
+        if es_sustitucion[d.id]:
+            variante_original = session.get(ProductoVariante, d.variante_id)
+            variante_venta = session.get(ProductoVariante, sustituta_id)
+            if variante_venta is None:
+                raise HTTPException(422, "La talla/color elegido ya no existe")
+            if (
+                variante_original is None
+                or variante_venta.producto_id != variante_original.producto_id
+            ):
+                raise HTTPException(
+                    422, "Solo se puede cambiar de talla o color de la misma prenda"
+                )
+            inv_venta = session.exec(
+                select(Inventario)
+                .where(
+                    Inventario.variante_id == variante_venta.id,
+                    Inventario.sucursal_id == reserva.sucursal_id,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).first()
+            if inv_venta is None or inv_venta.cantidad_disponible < item.cantidad_llevada:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "No hay stock de esa talla/color en esta sucursal",
+                )
+        else:
+            variante_venta = session.get(ProductoVariante, d.variante_id)
+            inv_venta = inventarios[d.id]
+
+        producto_venta = (
+            session.get(Producto, variante_venta.producto_id) if variante_venta else None
+        )
+        precio_disponible = (
+            variante_venta.precio if variante_venta and variante_venta.precio is not None
+            else (producto_venta.precio_base if producto_venta else None)
+        )
+        if precio_disponible is None:
+            raise HTTPException(
+                422, "Una de las prendas que se lleva no tiene precio de venta"
+            )
+
+        variantes_venta[d.id] = variante_venta
+        inventarios_venta[d.id] = inv_venta
+        precios[d.id] = ventas_service._precio_venta(session, variante_venta, producto_venta)
+
+    llevadas = {did: items_por_id[did].cantidad_llevada for did in por_id}
     unidades_llevadas = sum(llevadas.values())
     unidades_devueltas = sum(d.cantidad for d in detalles) - unidades_llevadas
 
@@ -497,49 +552,62 @@ def finalizar_reserva(
 
     for d in detalles:
         llevada = llevadas[d.id]
-        devuelta = d.cantidad - llevada
-        inv = inventarios[d.id]
+        sustitucion = es_sustitucion.get(d.id, False)
+        # Lo reservado de la variante ORIGINAL se libera entero si hubo
+        # sustitución (no se vende nada de lo reservado); si no, se libera
+        # solo lo que no se llevó.
+        devuelta_original = d.cantidad if sustitucion else (d.cantidad - llevada)
+        inv_original = inventarios[d.id]
         d.cantidad_llevada = llevada
         session.add(d)
-        if inv is not None:
+        if inv_original is not None:
             # Al reservar, todo pasó de disponible a reservado. Ahora sale de
             # "reservado": lo devuelto vuelve a disponible, lo llevado se vende.
-            inv.cantidad_reservada = max(0, inv.cantidad_reservada - d.cantidad)
-            inv.cantidad_disponible += devuelta
-            session.add(inv)
-        if devuelta > 0:
+            inv_original.cantidad_reservada = max(
+                0, inv_original.cantidad_reservada - d.cantidad
+            )
+            inv_original.cantidad_disponible += devuelta_original
+            session.add(inv_original)
+        if devuelta_original > 0:
             session.add(
                 MovimientoInventario(
                     variante_id=d.variante_id,
                     sucursal_id=reserva.sucursal_id,
                     usuario_id=encargado.id,
                     tipo=TipoMovimiento.LIBERACION_RESERVA,
-                    cantidad=devuelta,
+                    cantidad=devuelta_original,
                     nota=f"Devolución al finalizar la reserva #{reserva.id}",
                 )
             )
         if llevada > 0 and venta is not None:
+            variante_venta = variantes_venta[d.id]
+            inv_venta = inventarios_venta[d.id]
             original, precio, promocion_id = precios[d.id]
             session.add(
                 VentaDetalle(
                     venta_id=venta.id,
-                    variante_id=d.variante_id,
+                    variante_id=variante_venta.id,
                     sucursal_id=reserva.sucursal_id,
                     cantidad=llevada,
                     precio_unitario=precio,
                     precio_original=original,
                     promocion_id=promocion_id,
-                    costo_unitario=inv.costo_promedio if inv is not None else None,
+                    costo_unitario=inv_venta.costo_promedio if inv_venta else None,
                 )
             )
+            if sustitucion:
+                # Esta sí era stock disponible normal (nunca estuvo reservada).
+                inv_venta.cantidad_disponible -= llevada
+                session.add(inv_venta)
             session.add(
                 MovimientoInventario(
-                    variante_id=d.variante_id,
+                    variante_id=variante_venta.id,
                     sucursal_id=reserva.sucursal_id,
                     usuario_id=encargado.id,
                     tipo=TipoMovimiento.SALIDA_VENTA,
                     cantidad=llevada,
-                    nota=f"Venta #{venta.id} de la reserva #{reserva.id}",
+                    nota=f"Venta #{venta.id} de la reserva #{reserva.id}"
+                    + (" (cambio de talla/color al recoger)" if sustitucion else ""),
                 )
             )
 

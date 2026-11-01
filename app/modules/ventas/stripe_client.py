@@ -121,8 +121,18 @@ def cobrar_tarjeta_guardada(
 
 
 def reembolsar(payment_intent_id: str):
-    """CU14: se cobró pero al validar stock ya no había — se revierte."""
+    """CU14: se cobró pero al validar stock ya no había — se revierte entero."""
     return stripe.Refund.create(payment_intent=payment_intent_id)
+
+
+def reembolsar_parcial(payment_intent_id: str, monto_bs: Decimal):
+    """CU19 — cambio de talla: se le devuelve solo la diferencia (la venta
+    original sigue cobrada por el resto)."""
+    monto_usd = bs_a_usd(monto_bs)
+    return stripe.Refund.create(
+        payment_intent=payment_intent_id,
+        amount=int(monto_usd * 100),
+    )
 
 
 def generar_qr_data_url(contenido: str) -> str:

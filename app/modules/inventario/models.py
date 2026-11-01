@@ -21,8 +21,19 @@ class TipoMovimiento:
     SALIDA_VENTA = "SALIDA_VENTA"  # se vendió una prenda (CU22)
     LIBERACION_RESERVA = "LIBERACION_RESERVA"  # se liberó una reserva no comprada (CU17)
     ANULACION_VENTA = "ANULACION_VENTA"  # se canceló una venta pendiente de pago (CU22)
+    # CU18-23 — cambios y devoluciones (plazo 48h, motivo talla).
+    DEVOLUCION_CLIENTE = "DEVOLUCION_CLIENTE"  # el cajero/encargado confirmó que recibió la prenda devuelta
+    SALIDA_CAMBIO = "SALIDA_CAMBIO"  # se entregó la variante nueva de un cambio de talla
 
-    TODOS = (INGRESO, AJUSTE, SALIDA_VENTA, LIBERACION_RESERVA, ANULACION_VENTA)
+    TODOS = (
+        INGRESO,
+        AJUSTE,
+        SALIDA_VENTA,
+        LIBERACION_RESERVA,
+        ANULACION_VENTA,
+        DEVOLUCION_CLIENTE,
+        SALIDA_CAMBIO,
+    )
 
 
 class Inventario(SQLModel, table=True):

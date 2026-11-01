@@ -64,6 +64,10 @@ class ReservaSucursalOut(ReservaOut):
 class ItemFinalizarIn(BaseModel):
     detalle_id: int
     cantidad_llevada: int = Field(ge=0, le=20)
+    # CU17 — si el cliente se prueba la reserva y quiere otra talla/color de
+    # la misma prenda, se vende esta variante en vez de la reservada. Se
+    # libera la reservada original y se descuenta esta al cerrar la venta.
+    variante_sustituta_id: int | None = Field(default=None)
 
 
 class FinalizarReservaIn(BaseModel):

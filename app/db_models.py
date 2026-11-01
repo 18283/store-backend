@@ -4,6 +4,7 @@ Alembic importa este módulo para poblar `SQLModel.metadata` y detectar cambios.
 Cada vez que se agrega un módulo con tablas nuevas, se agrega su import acá.
 """
 
+from app.modules.cambios import models as cambios  # noqa: F401
 from app.modules.catalogo import models as catalogo  # noqa: F401
 from app.modules.ia import models as ia  # noqa: F401
 from app.modules.identidad import models as identidad  # noqa: F401

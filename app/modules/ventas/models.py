@@ -128,7 +128,12 @@ class Pago(SQLModel, table=True):
     __tablename__ = "pago"
 
     id: int | None = Field(default=None, primary_key=True)
-    venta_id: int = Field(foreign_key="venta.id")
+    # Nullable: un pago también puede corresponder a la diferencia cobrada
+    # en un cambio de talla (CU19), que no es una Venta nueva.
+    venta_id: int | None = Field(default=None, foreign_key="venta.id")
+    solicitud_cambio_id: int | None = Field(
+        default=None, foreign_key="solicitud_cambio_devolucion.id"
+    )
     metodo: str = Field(max_length=20)
     estado: str = Field(default=EstadoPago.PENDIENTE, max_length=20)
     monto: Decimal = Field(max_digits=10, decimal_places=2)
