@@ -611,6 +611,7 @@ def consultar_estado_pago(session: Session, cliente_id: int, venta_id: int) -> d
         stripe_session = stripe_client.obtener_session(ultimo_pago.stripe_session_id)
         if stripe_session.payment_status == "paid":
             ultimo_pago.estado = EstadoPago.APROBADO
+            ultimo_pago.stripe_payment_intent_id = stripe_session.payment_intent
             ultimo_pago.fecha_actualizacion = datetime.now(timezone.utc)
             session.add(ultimo_pago)
             # El despacho ocurre fuera del sistema (no hay actor de delivery):

@@ -409,13 +409,25 @@ def resolver(
             raise HTTPException(422, "Indicá cómo se le devuelve la diferencia al cliente")
         if data.forma_pago == FormaPagoDiferencia.STRIPE:
             pago_original = _pago_original_stripe(session, s.venta_id)
-            if pago_original is None or not pago_original.stripe_payment_intent_id:
+            if pago_original is None:
                 raise HTTPException(
                     422, "La venta original no se pagó por Stripe; elegí efectivo"
                 )
-            reembolso = stripe_client.reembolsar_parcial(
-                pago_original.stripe_payment_intent_id, abs(diferencia)
-            )
+            payment_intent_id = pago_original.stripe_payment_intent_id
+            if not payment_intent_id and pago_original.stripe_session_id:
+                # Pagos de antes de que empezáramos a guardar el payment_intent
+                # al confirmar el cobro: lo recuperamos de Stripe en el momento.
+                stripe_session = stripe_client.obtener_session(
+                    pago_original.stripe_session_id
+                )
+                payment_intent_id = stripe_session.payment_intent
+                pago_original.stripe_payment_intent_id = payment_intent_id
+                session.add(pago_original)
+            if not payment_intent_id:
+                raise HTTPException(
+                    422, "La venta original no se pagó por Stripe; elegí efectivo"
+                )
+            reembolso = stripe_client.reembolsar_parcial(payment_intent_id, abs(diferencia))
             session.add(
                 Pago(
                     venta_id=s.venta_id,
@@ -490,6 +502,7 @@ def confirmar_cobro_diferencia(
         )
 
     pago.estado = EstadoPago.APROBADO
+    pago.stripe_payment_intent_id = stripe_session.payment_intent
     pago.fecha_actualizacion = datetime.now(timezone.utc)
     session.add(pago)
 
