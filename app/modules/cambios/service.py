@@ -101,7 +101,10 @@ def crear_solicitud(
         )
 
     limite = venta.fecha_creacion + timedelta(hours=PLAZO_HORAS_SOLICITUD)
-    if datetime.now(timezone.utc) > limite:
+    # fecha_creacion viene de la base como datetime naive (sin tz); comparar
+    # contra un "ahora" naive en UTC evita el TypeError de comparar un
+    # datetime aware con uno naive.
+    if datetime.now(timezone.utc).replace(tzinfo=None) > limite:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Pasaron más de {PLAZO_HORAS_SOLICITUD} horas desde la compra; ya no se puede solicitar.",
