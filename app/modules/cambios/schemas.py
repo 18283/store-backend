@@ -42,6 +42,11 @@ class SolicitudOut(BaseModel):
     fecha_resolucion: datetime | None
     diferencia: Decimal | None
     forma_pago_diferencia: str | None
+    # Vista previa (solo mientras está SOLICITADO/RECIBIDO) de cuánto saldría
+    # cada acción posible al resolver, con los precios de hoy: positivo =
+    # cobra al cliente, negativo = se le devuelve. None si ya no aplica.
+    diferencia_cambio_estimada: Decimal | None = None
+    diferencia_devolucion_estimada: Decimal | None = None
 
 
 class SolicitudPage(BaseModel):

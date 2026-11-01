@@ -45,6 +45,26 @@ def _variante_texto(session: Session, variante_id: int | None) -> str | None:
     return f"{talla.valor if talla else '?'} · {color.nombre if color else '?'} · {variante.sku}"
 
 
+def _diferencias_estimadas(
+    session: Session, s: SolicitudCambioDevolucion
+) -> tuple[Decimal | None, Decimal]:
+    """Para mostrar en pantalla ANTES de resolver: cuánto saldría cada acción
+    posible (entregar cambio / devolver dinero), con los precios de hoy. El
+    monto real al resolver puede diferir levemente si el precio cambió."""
+    precio_devuelto = _precio_unitario_devuelto(session, s) * s.cantidad
+    diferencia_devolucion = -precio_devuelto
+    diferencia_cambio: Decimal | None = None
+    if s.variante_nueva_id is not None:
+        nueva_variante = session.get(ProductoVariante, s.variante_nueva_id)
+        if nueva_variante is not None:
+            producto_nuevo = session.get(Producto, nueva_variante.producto_id)
+            _, precio_unitario_nuevo, _ = ventas_service._precio_venta(
+                session, nueva_variante, producto_nuevo
+            )
+            diferencia_cambio = precio_unitario_nuevo * s.cantidad - precio_devuelto
+    return diferencia_cambio, diferencia_devolucion
+
+
 def _solicitud_out(session: Session, s: SolicitudCambioDevolucion) -> dict:
     cliente = session.get(Usuario, s.cliente_id)
     sucursal = session.get(Sucursal, s.sucursal_id)
@@ -54,6 +74,9 @@ def _solicitud_out(session: Session, s: SolicitudCambioDevolucion) -> dict:
         if variante_devuelta
         else None
     )
+    diferencia_cambio_est = diferencia_devolucion_est = None
+    if s.estado in (EstadoSolicitud.SOLICITADO, EstadoSolicitud.RECIBIDO):
+        diferencia_cambio_est, diferencia_devolucion_est = _diferencias_estimadas(session, s)
     return {
         "id": s.id,
         "venta_id": s.venta_id,
@@ -77,6 +100,8 @@ def _solicitud_out(session: Session, s: SolicitudCambioDevolucion) -> dict:
         "fecha_resolucion": s.fecha_resolucion,
         "diferencia": s.diferencia,
         "forma_pago_diferencia": s.forma_pago_diferencia,
+        "diferencia_cambio_estimada": diferencia_cambio_est,
+        "diferencia_devolucion_estimada": diferencia_devolucion_est,
     }
 
 
