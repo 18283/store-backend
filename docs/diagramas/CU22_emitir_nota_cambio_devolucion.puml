@@ -1,0 +1,94 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU22 Emitir nota de cambio o devolución" {
+
+    ' Nodos invisibles para dar altura y margen a los bordes
+    class " " as espaciador1 <<invisible>>
+    class " " as espaciador2 <<invisible>>
+    class "                                       " as espaciadorDerecha <<invisible>>
+    hide espaciador1
+    hide espaciador2
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":Sistema" as actor_sistema <<Actor>>
+    class ":InterfazNotas" as ui_notas <<Interfaz>>
+    class ":ControladorNotas" as ctrl_notas <<Control>>
+    class ":ServicioNotas" as svc_notas <<Control>>
+    class ":SolicitudDevolucion" as ent_solicitud <<Entidad>>
+    class ":Venta" as ent_venta <<Entidad>>
+    class ":ProductoVariante" as ent_variante <<Entidad>>
+    class ":Usuario/Sucursal" as ent_usuario_sucursal <<Entidad>>
+    class ":NotaCambioDevolucion" as ent_nota <<Entidad>>
+    class ":GestorDocumento" as ctrl_documento <<Control>>
+    class ":Auditoria" as ent_auditoria <<Entidad>>
+
+    ' Empuje de espacio vertical
+    espaciador1 -[hidden]down-> actor_sistema
+    espaciador2 -[hidden]down-> ctrl_notas
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: solicitud de emisión y recuperación de la operación      '
+    ' ------------------------------------------------------------------ '
+    actor_sistema -right- ui_notas : "1: SolicitarEmisionNota(solicitudId) >\n< 32: NumeroYUbicacionDocumento()"
+
+    ui_notas -right- ctrl_notas : "2: POST /notas/cambio-devolucion\n{solicitudId} >\n< 31: NotaOut(numero, url, estado)"
+
+    ctrl_notas -down- svc_notas : "3: emitirNota(solicitudId,\nusuarioSistemaId) @Transactional >\n< 30: NotaEmitida(numero,\nubicacion, estado)"
+
+    svc_notas -down- ent_solicitud : "4: ObtenerOperacionConfirmada(\nsolicitudId) >\n< 5: Solicitud + Detalle\n(RECIBIDA/RECEPCION_PARCIAL)\n12: ValidarOperacionYVenta(\noperacion, venta, reemplazo) >\n< 13: OK | Rechazo: no confirmada,\nincompleta, sin reemplazo, anulada\n26: AsociarNotaYActualizarEstado(\nnota, DOCUMENTADA/CERRADA) >\n< 27: Operación documentada\n(si hay saldo -> reembolso/cobro)"
+
+    svc_notas -down- ent_venta : "6: ObtenerVentaOriginal(\nsolicitud.venta_id) >\n< 7: Venta + Detalle\n(PAGADA/COMPLETADA)"
+
+    svc_notas -down- ent_usuario_sucursal : "8: ObtenerClienteSucursalResponsable(\nsolicitud) >\n< 9: Cliente, sucursal, empresa,\nresponsable"
+
+    svc_notas -down- ent_variante : "10: ObtenerPrendasDevueltasYEntregadas(\ndetalle; solo recibidas) >\n< 11: Variantes, SKU, talla, color,\ncantidades, precios; resto pendiente\n-> nota complementaria"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: validación de duplicados, numeración e importes          '
+    ' ------------------------------------------------------------------ '
+    svc_notas -down- ent_nota : "14: VerificarNotaDuplicada(\noperacionId, prendas) >\n< 15: Sin nota | Nota existente\n-> reimpresión (mismo número,\nsin consumir otro correlativo)\n18: CalcularImportes(detalleDevuelto,\ndetalleEntregado) >\n< 19: subtotales, diferencia\n(cliente/tienda), total, saldoPendiente\n20: ConstruirNota(numero, datos) >\nimportes, leyenda: documento\nseparado del comprobante\n(no lo reemplaza)\n< 21: Nota + Detalle + snapshot\n22: PersistirNotaEmitida(nota) >\nfechaHora, snapshot\n< 23: Nota EMITIDA"
+
+    svc_notas -down- ctrl_documento : "16: GenerarNumeroUnico(serieNota) >\npropia != comprobante\n< 17: numeroNota(serie, correlativo)\n24: GenerarDocumentoPDF(nota) >\nmodo=EMISION|REIMPRESION\n< 25: PDF / ruta; fallo -> rollback\ny reintento sin duplicar número"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: cierre de la operación y auditoría                       '
+    ' ------------------------------------------------------------------ '
+    svc_notas -down- ent_auditoria : "28: RegistrarEventoEmision(\nnotaId, usuarioId) >\n< 29: Evento registrado"
+
+    ' Extensión lateral para garantizar margen libre
+    ent_auditoria -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

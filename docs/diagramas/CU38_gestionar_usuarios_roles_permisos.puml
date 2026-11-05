@@ -1,0 +1,82 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU38 Gestionar usuarios, roles y permisos por empresa" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":InterfazUsuarios" as ui_usuarios <<boundary>>
+    class ":ControladorUsuarios" as ctrl_usuarios <<control>>
+    class ":ServicioIdentidad" as svc_identidad <<control>>
+    class ":ServicioSaaS" as svc_saas <<control>>
+    class ":Usuario" as ent_usuario <<entity>>
+    class ":Rol" as ent_rol <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+    class ":Sucursal/Proveedor" as ent_sucursal_proveedor <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_admin -down- ui_usuarios : "1: GestionarUsuarios() >\n< 14: MostrarPanelUsuarios()\n15: GuardarUsuario(datos, rolId, ...) >\n< 30: ConfirmarOperacion()"
+
+    ui_usuarios -down- ctrl_usuarios : "2: AbrirGestionUsuarios(JWT) >\n< 13: PanelUsuarios(...)\n16: GuardarUsuario(datos) >\n< 29: UsuarioOut()"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controles de usuarios, identidad y plan SaaS             '
+    ' ------------------------------------------------------------------ '
+    ctrl_usuarios -right- svc_identidad : "7: ListarUsuarios + ListarRoles >\n< 12: Usuarios + Roles\n17: GuardarUsuario(empresaId, actorId) >\n< 28: UsuarioGuardado()"
+
+    svc_identidad -right- svc_saas : "24: ValidarLimiteUsuarios(empresaId) >\n< 25: Cupo disponible"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: validación de permisos y entidades del tenant            '
+    ' ------------------------------------------------------------------ '
+    ctrl_usuarios -down- ent_usuario : "3: get_authenticated_user(id) >\n< 4: Usuario activo"
+
+    ctrl_usuarios -down- ent_empresa : "5: require_roles(Administrador) + empresa activa >\n< 6: Empresa activa y rol autorizado"
+
+    svc_identidad -down- ent_usuario : "8: ConsultarPorEmpresa(empresaId) >\n< 9: Usuarios\n18: ValidarEmailUnico /\nObtenerUsuarioDeEmpresa (tenant + autoedición) >\n< 19: Disponible / Usuario\n26: GuardarUsuario(empresaId, rolId, ...) >\n< 27: Usuario guardado"
+
+    svc_identidad -down- ent_rol : "10: ConsultarRolesAsignables() >\n< 11: Roles (sin Superadmin)\n20: ValidarRolAsignable(rolId) >\n< 21: Rol válido"
+
+    svc_identidad -down- ent_sucursal_proveedor : "22: ValidarPertenenciaEmpresa(...) >\n< 23: Válidos"
+
+    ' Margen derecho
+    ent_sucursal_proveedor -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

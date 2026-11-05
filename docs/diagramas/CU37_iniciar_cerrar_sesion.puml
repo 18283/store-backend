@@ -1,0 +1,110 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 55
+skinparam ranksep 55
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU37 Iniciar y cerrar sesión y validar acceso" {
+
+    ' Nodos invisibles para dar altura y margen a los bordes
+    class " " as espaciador1 <<invisible>>
+    class " " as espaciador2 <<invisible>>
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciador1
+    hide espaciador2
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":UsuarioAutenticado" as actor_usuario <<actor>>
+    class ":InterfazSesion" as ui_sesion <<boundary>>
+    class ":ControladorAutenticacion" as ctrl_auth <<control>>
+    class ":ServicioIdentidad" as svc_identidad <<control>>
+    class ":SeguridadJWT" as jwt_seguridad <<control>>
+    class ":Usuario" as ent_usuario <<entity>>
+    class ":Rol" as ent_rol <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+
+    ' Empuje de espacio vertical
+    espaciador1 -[hidden]down-> actor_usuario
+    espaciador2 -[hidden]down-> ctrl_auth
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_usuario -right- ui_sesion : "1: IniciarSesion(email, password) >\n< 12: MostrarPanelSegunRol()\n13: SolicitarRecursoProtegido() >\n< 24: MostrarContenidoAutorizado()\n25: CerrarSesion() >\n< 27: ConfirmarCierreSesion()"
+
+    ui_sesion -down- ctrl_auth : "2: POST /auth/login >\n< 11: TokenOut\n14: ValidarAcceso(recurso) >\n< 23: RecursoAutorizado"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controles de autenticación, servicio y seguridad JWT     '
+    ' ------------------------------------------------------------------ '
+    ctrl_auth -right- svc_identidad : "3: authenticate(email, password) >\n< 8: UsuarioValidado()"
+
+    svc_identidad -right- jwt_seguridad : "6: verify_password >\n< 7: EsValida()"
+
+    ctrl_auth -right- jwt_seguridad : "9: create_access_token >\n< 10: JWT(sub, iat, exp)\n15: decode_access_token >\n< 16: payload"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: entidades consultadas por el flujo de sesión             '
+    ' ------------------------------------------------------------------ '
+    ctrl_auth -down- ent_rol : "19: get(rol_id) + validar rol >\n< 20: Rol autorizado"
+
+    ctrl_auth -down- ent_empresa : "21: get(empresa_id) + activa >\n< 22: Empresa"
+
+    ctrl_auth -down- ent_usuario : "17: get_authenticated_user >\n< 18: Usuario activo"
+
+    svc_identidad -down- ent_usuario : "4: get_usuario_by_email(email) >\n< 5: Usuario | None"
+
+    ' ------------------------------------------------------------------ '
+    ' Cerrar sesión: JWT stateless, se elimina el token en el cliente   '
+    ' ------------------------------------------------------------------ '
+    ui_sesion -right-> ui_sesion : "26: EliminarTokenAlmacenado()"
+
+    ' Extensión lateral para garantizar margen libre
+    ent_usuario -[hidden]right-> espaciadorDerecha
+}
+
+legend bottom
+  **Notas y flujos alternativos**
+  * **Login:** email inexistente o contraseña incorrecta → 401 "Email o contraseña incorrectos";
+    usuario con activo = false → 403 "La cuenta está desactivada".
+  * **Validar acceso:** JWT ausente, inválido o expirado → 401 "Credenciales inválidas";
+    usuario inactivo → 401.
+  * **Validar acceso:** usuario sin empresa (salvo Superadministrador) → 403
+    "El usuario no está asociado a una empresa"; Empresa.activa = false → 403
+    "La empresa está suspendida"; rol no autorizado → 403 "No tiene permisos para esta operación".
+  * **Alcance:** GET /auth/me valida solo JWT + usuario activo (mensajes 14-18);
+    los endpoints con CurrentUser/require_roles agregan empresa activa y rol (mensajes 19-22).
+  * **Cerrar sesión:** el backend no expone /auth/logout porque el JWT es stateless;
+    la interfaz elimina el token local (mensaje 26) y un token copiado sigue válido hasta su expiración.
+    Sin token, /auth/me responde 401.
+endlegend
+
+@enduml

@@ -1,0 +1,88 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU24 Solicitar traspaso de prenda" {
+
+    ' Nodos invisibles para dar altura y margen a los bordes
+    class " \n \n \n \n " as espaciador1 <<invisible>>
+    class " " as espaciador2 <<invisible>>
+    class "                                       " as espaciadorDerecha <<invisible>>
+    hide espaciador1
+    hide espaciador2
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":ClienteOEncargado" as actor_traspaso <<Actor>>
+    class ":InterfazTraspasos" as ui_traspasos <<Interfaz>>
+    class ":ControladorTraspasos" as ctrl_traspasos <<Control>>
+    class ":ServicioTraspasos" as svc_traspasos <<Control>>
+    class ":Usuario/Rol" as ent_usuario_rol <<Entidad>>
+    class ":Sucursal" as ent_sucursal <<Entidad>>
+    class ":ProductoVariante" as ent_variante <<Entidad>>
+    class ":Inventario" as ent_inventario <<Entidad>>
+    class ":SolicitudTraspaso" as ent_solicitud <<Entidad>>
+
+    ' Empuje de espacio vertical
+    espaciador1 -[hidden]down-> actor_traspaso
+    espaciador2 -[hidden]down-> ctrl_traspasos
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: apertura, rol y ámbito                                    '
+    ' ------------------------------------------------------------------ '
+    actor_traspaso -right- ui_traspasos : "1: SolicitarTraspaso() >\n< 10: MostrarFormulario(\nrol, sucursales, destino permitido)\n11: BuscarVariante(producto/SKU/\ntalla/color) >\n< 20: MostrarVarianteYSucursalesConStock(\nvariante, origen, ciudad, cantidad)\n21: SeleccionarOrigenDestinoCantidad(\norigenId, destinoId, cantidad,\nmotivo/observación) >\n< 40: MostrarResumenSolicitud(\ncodigo, PENDIENTE, origen, destino;\ndisponible para evaluación\ny seguimiento)"
+
+    ui_traspasos -right- ctrl_traspasos : "2: GET /traspasos/opciones >\n< 9: OpcionesTraspasoOut(\nrol, sucursales, destino permitido)\n12: GET /traspasos/variantes\n?q=... >\n< 19: VariantesConStockOut(...)\n22: POST /traspasos\n{varianteId, origenId, destinoId,\ncantidad, motivo/observación} >\n< 39: SolicitudTraspasoOut(\ncodigo, estado, resumen)"
+
+    ctrl_traspasos -down- svc_traspasos : "3: require_roles(Cliente,\nEncargadoSucursal) + prepararFormulario(\nactorId) >\n< 8: OpcionesTraspasoOut(...)\n13: buscarVariantes(criterio,\nactorId) >\n< 18: VariantesConStockOut(...)\n23: solicitarTraspaso(data,\nactorId) @Transactional >\n< 38: SolicitudTraspasoOut(...)"
+
+    svc_traspasos -down- ent_usuario_rol : "4: ObtenerRolEmpresaSucursal(\nactorId) >\n< 5: Rol, usuario/empresa activos,\nsucursal asignada, clienteId\n24: ValidarPermisoDestino(actor,\ndestinoId) >\n< 25: Permitido | Denegado;\nEncargadoSucursal -> propia sucursal"
+
+    svc_traspasos -down- ent_sucursal : "6: ObtenerSucursalesActivas(\nempresaId, rol) >\n< 7: Sucursales activas;\nCliente elige destino,\nEncargadoSucursal -> sucursal asignada\n28: ValidarOrigenDestino(origenId,\ndestinoId, empresaId) >\n< 29: OK | iguales | inactiva |\ninexistente | otra empresa"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: búsqueda de variante y disponibilidad                    '
+    ' ------------------------------------------------------------------ '
+    svc_traspasos -down- ent_variante : "14: BuscarVariantes(empresaId,\ncriterio) >\n< 15: Variantes activas\n(producto, SKU, talla, color)\n26: ObtenerVarianteActiva(\nvarianteId, empresaId) >\n< 27: Variante | inexistente |\ninactiva | otra empresa"
+
+    svc_traspasos -down- ent_inventario : "16: ObtenerSucursalesConStock(\nvarianteId, empresaId) >\n< 17: Origen, ciudad,\ncantidadDisponible\n| Sin stock en otras sucursales\n-> no genera solicitud\n30: ValidarStock(origenId,\nvarianteId, cantidad) >\n< 31: Suficiente | sin stock |\ncantidad <= 0 | supera stock\n32: ConsultarStockDestino(\ndestinoId, varianteId) >\n< 33: Stock destino;\nsi ya es suficiente ->\npedir confirmación; si confirma,\ncontinuar"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: control de duplicados y registro                         '
+    ' ------------------------------------------------------------------ '
+    svc_traspasos -down- ent_solicitud : "34: VerificarPendienteDuplicada(\nvarianteId, origenId, destinoId) >\n< 35: Sin duplicado |\nSolicitud existente -> consultar\n(no crear otra)\n36: CrearSolicitud(codigoUnico,\nPENDIENTE, fechaHora, solicitante,\norigen, destino, variante,\ncantidad, motivo/observación) >\n< 37: Solicitud PENDIENTE;\ninventario sin cambios\n| fallo al guardar -> rollback,\nreintentar sin duplicar"
+
+    ' Extensión lateral para garantizar margen libre
+    ent_solicitud -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

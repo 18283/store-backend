@@ -1,0 +1,93 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU21 Confirmar recepción de la prenda devuelta" {
+
+    ' Nodos invisibles para dar altura y margen a los bordes
+    class " " as espaciador1 <<invisible>>
+    class " " as espaciador2 <<invisible>>
+    class "                                       " as espaciadorDerecha <<invisible>>
+    hide espaciador1
+    hide espaciador2
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":CajeroOEncargado" as actor_cajero <<Actor>>
+    class ":InterfazDevoluciones" as ui_devoluciones <<Interfaz>>
+    class ":ControladorDevoluciones" as ctrl_devoluciones <<Control>>
+    class ":ServicioDevoluciones" as svc_devoluciones <<Control>>
+    class ":SolicitudDevolucion" as ent_solicitud <<Entidad>>
+    class ":Venta" as ent_venta <<Entidad>>
+    class ":ProductoVariante" as ent_variante <<Entidad>>
+    class ":Inventario" as ent_inventario <<Entidad>>
+    class ":MovimientoInventario" as ent_movimiento <<Entidad>>
+    class ":Usuario/Sucursal" as ent_usuario_sucursal <<Entidad>>
+
+    ' Empuje de espacio vertical
+    espaciador1 -[hidden]down-> actor_cajero
+    espaciador2 -[hidden]down-> ctrl_devoluciones
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: búsqueda y presentación de la solicitud                  '
+    ' ------------------------------------------------------------------ '
+    actor_cajero -right- ui_devoluciones : "1: BuscarSolicitud(código/venta/cliente) >\n< 13: MostrarSolicitud(cliente, fecha,\nsucursal, prendas, cantidades,\nprecio, motivo)\n14: ConfirmarRecepcion(items,\nobservaciones) >\n< 31: MostrarResumenRecepcion()"
+
+    ui_devoluciones -right- ctrl_devoluciones : "2: GET /devoluciones/solicitudes\n?filtro=... >\n< 12: SolicitudDevolucionOut\n15: POST /devoluciones/{id}/recepcion >\n< 30: RecepcionDevolucionOut"
+
+    ctrl_devoluciones -down- ent_usuario_sucursal : "3: require_roles(Cajero,\nEncargado) + empresa activa >\n< 3.1: Usuario autorizado"
+
+    ctrl_devoluciones -down- svc_devoluciones : "4: buscarSolicitud(filtro,\nusuarioId, empresaId) >\n< 11: SolicitudDevolucionOut\n16: confirmarRecepcion(solicitudId,\nusuarioId, items, observaciones)\n@Transactional >\n< 29: RecepcionDevolucionOut"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: recuperación de la solicitud, venta y variante           '
+    ' ------------------------------------------------------------------ '
+    svc_devoluciones -down- ent_solicitud : "5: ObtenerSolicitudPendiente(filtro) >\n< 6: Solicitud + Detalle\n(PENDIENTE_RECEPCION)\n17: ValidarPendienteYUnidades(items) >\n< 18: OK, sin confirmación previa,\ncantidades <= pendientes y vendidas\n23: RegistrarRecepcionYEstado(items,\nobservaciones, fechaHora, usuarioId) >\n< 24: Detalle + estado RECIBIDA /\nRECEPCION_PARCIAL"
+
+    svc_devoluciones -down- ent_venta : "7: ObtenerVentaYDetalle(\nsolicitud.venta_id) >\n< 8: Venta + Detalle\n19: ValidarLineaYEstado(venta,\ndetalle, items) >\n< 20: Venta PAGADA/COMPLETADA,\nlínea y variante válidas"
+
+    svc_devoluciones -down- ent_variante : "9: ObtenerVariante(\ndetalle.variante_id) >\n< 10: Producto, SKU, Talla, Color"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: permisos, recepción, stock y trazabilidad                '
+    ' ------------------------------------------------------------------ '
+    svc_devoluciones -down- ent_usuario_sucursal : "21: ValidarPermisoSucursal(usuario,\nsolicitud.sucursal_id, empresaId) >\n< 22: Rol Cajero/Encargado,\nsucursal habilitada, misma empresa\ny coincide con el actor"
+
+    svc_devoluciones -down- ent_inventario : "25: IncrementarStock(varianteId,\nsucursalId, cantidadRecibida) >\n< 26: Stock actualizado /\nfila de inventario creada"
+
+    svc_devoluciones -down- ent_movimiento : "27: RegistrarIngresoDevolucion(\nventaId, solicitudId, detalleId,\nvarianteId, sucursalId, cantidad,\nusuarioId) >\n< 28: MovimientoInventario(\ntipo=INGRESO_DEVOLUCION,\nnota=venta/solicitud)"
+
+    ' Extensión lateral para garantizar margen libre
+    ent_movimiento -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

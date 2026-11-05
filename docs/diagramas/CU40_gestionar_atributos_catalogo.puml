@@ -1,0 +1,74 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 150
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU40 Gestionar atributos del catálogo" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":InterfazCatalogo" as ui_catalogo <<boundary>>
+    class ":ControladorCatalogo" as ctrl_catalogo <<control>>
+    class ":ServicioCatalogo" as svc_catalogo <<control>>
+    class ":AtributoCatalogo\n(Categoria/Talla/Color/\nTemporada/Coleccion)" as ent_atributo <<entity>>
+    class ":Temporada" as ent_temporada <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_admin -down- ui_catalogo : "1: GestionarAtributosCatalogo(tipo) >\n< 8: MostrarAtributos()\n9: GuardarAtributo(tipo, datos) >\n< 18: ConfirmarGuardado()"
+
+    ui_catalogo -down- ctrl_catalogo : "2: AbrirGestionAtributos(JWT, tipo) >\n< 7: AtributoPage\n10: GuardarAtributo(tipo, datos) >\n< 17: AtributoOut"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de empresa            '
+    ' ------------------------------------------------------------------ '
+    ctrl_catalogo -right- svc_catalogo : "4: ListarAtributos(tipo, empresaId) >\n< 6: AtributoPage\n11: GuardarAtributo(tipo, datos, empresaId) >\n< 16: AtributoOut"
+
+    ctrl_catalogo -down- ent_empresa : "3: require_roles(Administrador) + empresa activa >\n< Empresa activa"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: entidades y validaciones del tenant                      '
+    ' ------------------------------------------------------------------ '
+    svc_catalogo -down- ent_atributo : "5: Consultar(tipo, empresaId, filtros) >\n< Atributos\n12: ObtenerPorId(id, empresaId) (si actualiza) >\n< Atributo\n14: ValidarReglas(tipo, datos, empresaId) >\n< Válido\n15: Guardar(tipo, empresaId, datos) >\n< Atributo guardado"
+
+    svc_catalogo -down- ent_temporada : "13: ValidarTemporada(temporadaId, empresaId) (si colección) >\n< Válida"
+
+    ' Margen derecho
+    ent_temporada -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

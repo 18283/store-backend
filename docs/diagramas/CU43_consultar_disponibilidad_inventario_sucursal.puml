@@ -1,0 +1,80 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 90
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU43 Consultar disponibilidad e inventario por sucursal" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":AdministradorOEncargado" as actor_inv <<actor>>
+    class ":InterfazInventario" as ui_inv <<boundary>>
+    class ":ControladorInventario" as ctrl_inv <<control>>
+    class ":ServicioInventario" as svc_inv <<control>>
+    class ":Inventario" as ent_inv <<entity>>
+    class ":ProductoVariante" as ent_variante <<entity>>
+    class ":Sucursal" as ent_sucursal <<entity>>
+    class ":Usuario/Rol" as ent_usuario <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_inv -down- ui_inv : "1: ConsultarInventario() >\n< 13: MostrarInventario()"
+
+    ui_inv -down- ctrl_inv : "2: ListarInventario(JWT, sucursalId?, q, page) >\n< 12: InventarioPage"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de acceso             '
+    ' ------------------------------------------------------------------ '
+    ctrl_inv -right- svc_inv : "5: ListarInventario(empresaId, filtros, sucursalPermitida) >\n< 11: InventarioPage"
+
+    ctrl_inv -down- ent_empresa : "3: require_roles(Administrador, Encargado) + empresa activa >\n< Empresa activa"
+
+    ctrl_inv -down- ent_usuario : "4: ObtenerRolYSucursal(usuarioId) >\n< Rol, sucursalPermitida"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: consulta de inventario y composición de la respuesta     '
+    ' ------------------------------------------------------------------ '
+    svc_inv -down- ent_inv : "8: ConsultarStock(filtros, page, size) >\n< Inventario (stock, reservado, costo, estado)"
+
+    svc_inv -down- ent_variante : "7: BuscarVariantes(q) (si q) >\n< Variantes\n9: ObtenerDetalle(varianteId) (por fila) >\n< Producto, SKU, Talla, Color"
+
+    svc_inv -down- ent_sucursal : "6: FiltrarSucursalesDeEmpresa(empresaId) >\n< Sucursales de la empresa\n10: ObtenerDatos(sucursalId) (por fila) >\n< Nombre, Ciudad"
+
+    ' Margen derecho
+    ent_sucursal -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

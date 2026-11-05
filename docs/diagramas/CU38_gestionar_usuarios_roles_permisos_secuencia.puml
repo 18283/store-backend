@@ -1,0 +1,189 @@
+@startuml
+skinparam style strictuml
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Configuración para forzar flechas síncronas y estilos estrictos UML 2.5 / 2.5.1
+skinparam sequence {
+    ArrowColor #000000
+    LifeLineBorderColor #666666
+    LifeLineBackgroundColor #FFFFFF
+    GroupBorderColor #333333
+    GroupBackgroundColor #FAFAFA
+    ParticipantBorderColor #334155
+    ParticipantBackgroundColor #FFFFFF
+}
+
+' Declaración de Participantes (Actor -> Interfaz -> Control -> Servicio/SaaS -> Entidades)
+participant ":AdministradorEmpresa" as Actor <<Actor>>
+participant ":InterfazUsuarios" as Vista <<Interfaz>>
+participant ":ControladorUsuarios" as Controller <<Control>>
+participant ":ServicioIdentidad" as Service <<Control>>
+participant ":ServicioSaaS" as SaaS <<Control>>
+participant ":Usuario" as Usuario <<Entidad>>
+participant ":Rol" as Rol <<Entidad>>
+participant ":Empresa" as Empresa <<Entidad>>
+participant ":Sucursal/Proveedor" as TenantRef <<Entidad>>
+
+group sd CU38 Gestionar usuarios, roles y permisos por empresa
+
+    ' ------------------------------------------------------------------ '
+    ' 1. Acceso a la gestión y consulta de usuarios y roles              '
+    ' ------------------------------------------------------------------ '
+    Actor -[#black]> Vista : 1 : GestionarUsuarios()
+    activate Vista
+
+    Vista -[#black]> Controller : 2 : AbrirGestionUsuarios(JWT)
+    activate Controller
+
+    Controller -[#black]> Usuario : 3 : get_authenticated_user(user_id)
+    activate Usuario
+    Usuario --> Controller : 4 : Usuario activo
+    deactivate Usuario
+
+    Controller -[#black]> Rol : 5 : get(rol_id) + require_roles(Administrador)
+    activate Rol
+    Rol --> Controller : 6 : Rol autorizado
+    deactivate Rol
+
+    Controller -[#black]> Empresa : 7 : get(empresa_id) + validar activa
+    activate Empresa
+    Empresa --> Controller : 8 : Empresa activa
+    deactivate Empresa
+
+    Controller -[#black]> Service : 9 : list_usuarios(empresa_id, filtros)\nlist_roles()
+    activate Service
+
+    Service -[#black]> Usuario : 10 : consultar usuarios de la empresa
+    activate Usuario
+    Usuario --> Service : 11 : Usuarios
+    deactivate Usuario
+
+    Service -[#black]> Rol : 12 : list_roles() sin Superadministrador
+    activate Rol
+    Rol --> Service : 13 : Roles asignables
+    deactivate Rol
+
+    loop por cada usuario de la página
+        Service -[#black]> Rol : 14 : get(usuario.rol_id)
+        activate Rol
+        Rol --> Service : 15 : Rol
+        deactivate Rol
+    end
+
+    Service --> Controller : 16 : UsuarioPage + Roles
+    deactivate Service
+
+    Controller --> Vista : 17 : UsuarioPage + Roles
+    deactivate Controller
+
+    Vista --> Actor : 18 : MostrarPanelUsuarios(usuarios, roles)
+    deactivate Vista
+
+    ' ------------------------------------------------------------------ '
+    ' 2. Alta, edición o desactivación de un usuario de la empresa       '
+    ' ------------------------------------------------------------------ '
+    Actor -[#black]> Vista : 19 : GuardarUsuario(datos, rolId,\nsucursalId?, proveedorId?)
+    activate Vista
+
+    alt Alta de usuario
+        Vista -[#black]> Controller : 20 : POST /usuarios\nJWT + datos
+        activate Controller
+
+        Controller -[#black]> Service : 21 : create_usuario(datos, empresa_id)
+        activate Service
+
+        Service -[#black]> Usuario : 22 : get_usuario_by_email(email)
+        activate Usuario
+        Usuario --> Service : 23 : Disponible
+        deactivate Usuario
+
+        Service -[#black]> Rol : 24 : get(rol_id) + validar asignable
+        activate Rol
+        Rol --> Service : 25 : Rol válido
+        deactivate Rol
+
+        Service -[#black]> TenantRef : 26 : validar sucursal/proveedor\nde la empresa
+        activate TenantRef
+        TenantRef --> Service : 27 : Referencias válidas
+        deactivate TenantRef
+
+        Service -[#black]> SaaS : 28 : validar_limite_disponible(empresa_id,\nMAX_USUARIOS)
+        activate SaaS
+        SaaS -> SaaS : 29 : validar suscripción, plan\ny usuarios activos
+        SaaS --> Service : 30 : Cupo disponible
+        deactivate SaaS
+
+        Service -> Service : 31 : hash_password(password)
+        Service -[#black]> Usuario : 32 : crear + commit/refresh
+        activate Usuario
+        Usuario --> Service : 33 : Usuario creado
+        deactivate Usuario
+
+        Service -[#black]> Rol : 34 : get(rol_id) para UsuarioOut
+        activate Rol
+        Rol --> Service : 35 : Rol
+        deactivate Rol
+
+        Service --> Controller : 36 : UsuarioOut
+        deactivate Service
+
+        Controller --> Vista : 37 : 201 UsuarioOut
+        deactivate Controller
+
+    else Edición o desactivación
+        Vista -[#black]> Controller : 38 : PATCH /usuarios/{id}\nJWT + cambios
+        activate Controller
+
+        Controller -[#black]> Service : 39 : update_usuario(id, cambios,\nactor_id, empresa_id)
+        activate Service
+
+        Service -[#black]> Usuario : 40 : get(usuario_id) + validar empresa
+        activate Usuario
+        Usuario --> Service : 41 : Usuario del tenant
+        deactivate Usuario
+
+        Service -> Service : 42 : validar autoedición\n(no desactivarse ni cambiar su rol)
+
+        Service -[#black]> Usuario : 43 : get_usuario_by_email(email)\n[si cambia email]
+        activate Usuario
+        Usuario --> Service : 44 : Disponible
+        deactivate Usuario
+
+        Service -[#black]> Rol : 45 : get(rol_id) + validar asignable\n[si cambia rol]
+        activate Rol
+        Rol --> Service : 46 : Rol válido
+        deactivate Rol
+
+        Service -[#black]> TenantRef : 47 : validar sucursal/proveedor\n[si cambian]
+        activate TenantRef
+        TenantRef --> Service : 48 : Referencias válidas
+        deactivate TenantRef
+
+        Service -> Service : 49 : hash_password(password)\n[si cambia]
+        Service -[#black]> Usuario : 50 : actualizar + commit/refresh
+        activate Usuario
+        Usuario --> Service : 51 : Usuario actualizado
+        deactivate Usuario
+
+        Service -[#black]> Rol : 52 : get(rol_id) para UsuarioOut
+        activate Rol
+        Rol --> Service : 53 : Rol
+        deactivate Rol
+
+        Service --> Controller : 54 : UsuarioOut
+        deactivate Service
+
+        Controller --> Vista : 55 : 200 UsuarioOut
+        deactivate Controller
+    end
+
+    Vista --> Actor : 56 : ConfirmarOperacion(usuario)
+    deactivate Vista
+
+end
+
+@enduml

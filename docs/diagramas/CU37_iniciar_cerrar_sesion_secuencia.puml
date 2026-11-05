@@ -1,0 +1,126 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Configuración para forzar flechas síncronas y estilos estrictos UML 2.5 / 2.5.1
+skinparam sequence {
+    ArrowColor #000000
+    LifeLineBorderColor #666666
+    LifeLineBackgroundColor #FFFFFF
+    GroupBorderColor #333333
+    GroupBackgroundColor #FAFAFA
+    ParticipantBorderColor #334155
+    ParticipantBackgroundColor #FFFFFF
+}
+
+' Declaración de Participantes (Actor -> Interfaz -> Control -> Servicio/Seguridad -> Entidades)
+participant ":UsuarioAutenticado" as Actor <<Actor>>
+participant ":InterfazSesion" as Vista <<Interfaz>>
+participant ":ControladorAutenticacion" as Controller <<Control>>
+participant ":ServicioIdentidad" as Service <<Control>>
+participant ":SeguridadJWT" as Security <<Control>>
+participant ":Usuario" as Usuario <<Entidad>>
+participant ":Rol" as Rol <<Entidad>>
+participant ":Empresa" as Empresa <<Entidad>>
+
+group sd CU37 Iniciar y cerrar sesión y validar acceso
+
+    ' ------------------------------------------------------------------ '
+    ' 1. Inicio de sesión                                                '
+    ' ------------------------------------------------------------------ '
+    Actor -[#black]> Vista : 1 : IniciarSesion(email, password)
+    activate Vista
+
+    Vista -[#black]> Controller : 2 : POST /auth/login\n(username=email, password)
+    activate Controller
+
+    Controller -[#black]> Service : 3 : authenticate(session, email, password)
+    activate Service
+
+    Service -[#black]> Usuario : 4 : get_usuario_by_email(email)
+    activate Usuario
+    Usuario --> Service : 5 : Usuario | None
+    deactivate Usuario
+
+    Service -[#black]> Security : 6 : verify_password(password, password_hash)
+    activate Security
+    Security --> Service : 7 : EsValida()
+    deactivate Security
+
+    Service --> Controller : 8 : UsuarioValidado()
+    deactivate Service
+
+    Controller -[#black]> Security : 9 : create_access_token(usuario.id)
+    activate Security
+    Security --> Controller : 10 : JWT(sub, iat, exp)
+    deactivate Security
+
+    Controller -[#black]> Service : 11 : to_usuario_out(session, usuario)
+    activate Service
+    Service -[#black]> Rol : 12 : get(usuario.rol_id)
+    activate Rol
+    Rol --> Service : 13 : Rol
+    deactivate Rol
+    Service --> Controller : 14 : UsuarioOut
+    deactivate Service
+
+    Controller --> Vista : 15 : TokenOut(access_token,\ntoken_type="bearer", usuario)
+    deactivate Controller
+
+    Vista -> Vista : 16 : AlmacenarToken(access_token)
+    Vista --> Actor : 17 : MostrarPanelSegunRol(usuario.rol)
+    deactivate Vista
+
+    ' ------------------------------------------------------------------ '
+    ' 2. Validación de acceso a un recurso protegido                     '
+    ' ------------------------------------------------------------------ '
+    Actor -[#black]> Vista : 18 : SolicitarRecursoProtegido()
+    activate Vista
+
+    Vista -[#black]> Controller : 19 : ValidarAcceso(recurso,\nAuthorization: Bearer token)
+    activate Controller
+
+    Controller -[#black]> Security : 20 : decode_access_token(token)
+    activate Security
+    Security --> Controller : 21 : payload(sub, iat, exp)
+    deactivate Security
+
+    Controller -[#black]> Usuario : 22 : get_authenticated_user(user_id)
+    activate Usuario
+    Usuario --> Controller : 23 : Usuario activo
+    deactivate Usuario
+
+    Controller -[#black]> Rol : 24 : get(rol_id) + validar rol/permiso
+    activate Rol
+    Rol --> Controller : 25 : Rol autorizado
+    deactivate Rol
+
+    Controller -[#black]> Empresa : 26 : get(empresa_id) + activa
+    activate Empresa
+    Empresa --> Controller : 27 : Empresa activa
+    deactivate Empresa
+
+    Controller --> Vista : 28 : RecursoAutorizado(data)
+    deactivate Controller
+
+    Vista --> Actor : 29 : MostrarContenidoAutorizado(data)
+    deactivate Vista
+
+    ' ------------------------------------------------------------------ '
+    ' 3. Cierre de sesión: JWT stateless, se elimina el token local       '
+    ' ------------------------------------------------------------------ '
+    Actor -[#black]> Vista : 30 : CerrarSesion()
+    activate Vista
+
+    Vista -> Vista : 31 : EliminarTokenAlmacenado()
+    Vista --> Actor : 32 : ConfirmarCierreSesion()
+    deactivate Vista
+
+end
+
+@enduml

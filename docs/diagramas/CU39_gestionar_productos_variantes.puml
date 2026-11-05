@@ -1,0 +1,80 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU39 Gestionar productos y variantes" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":InterfazProductos" as ui_productos <<boundary>>
+    class ":ControladorProductos" as ctrl_productos <<control>>
+    class ":ServicioProductos" as svc_productos <<control>>
+    class ":Producto" as ent_producto <<entity>>
+    class ":ProductoVariante" as ent_variante <<entity>>
+    class ":Categoria/Coleccion/Proveedor" as ent_refs <<entity>>
+    class ":Talla/Color" as ent_talla_color <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_admin -down- ui_productos : "1: GestionarProductos() >\n< 8: MostrarProductos()\n9: CrearProducto(datos, refs) >\n< 16: ConfirmarProducto()\n17: AgregarVariante(productoId, datos) >\n< 26: ConfirmarVariante()"
+
+    ui_productos -down- ctrl_productos : "2: AbrirGestionProductos(JWT) >\n< 7: ProductoPage\n10: CrearProducto(datos) >\n< 15: 201 ProductoOut\n18: AgregarVariante(productoId, datos) >\n< 25: 201 VarianteOut"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de empresa            '
+    ' ------------------------------------------------------------------ '
+    ctrl_productos -right- svc_productos : "4: ListarProductos(empresaId, filtros) >\n< 6: ProductoPage\n11: CrearProducto(datos, empresaId) >\n< 14: ProductoOut\n19: AgregarVariante(productoId, datos, empresaId) >\n< 24: VarianteOut"
+
+    ctrl_productos -down- ent_empresa : "3: require_roles(Administrador) + empresa activa >\n< Empresa activa"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: entidades y validaciones del tenant                      '
+    ' ------------------------------------------------------------------ '
+    svc_productos -down- ent_refs : "12: ValidarRefs(ids, empresaId) >\n< Válidas"
+
+    svc_productos -down- ent_producto : "5: ConsultarPorEmpresa(empresaId, filtros) >\n< Productos\n13: GuardarProducto(empresaId, ...) >\n< Producto creado\n20: ObtenerProducto(productoId, empresaId) >\n< Producto"
+
+    svc_productos -down- ent_talla_color : "21: ValidarTallaColor(ids, empresaId) >\n< Válidos"
+
+    svc_productos -down- ent_variante : "22: ValidarSkuYCombinacion(sku, tallaId, colorId, empresaId) >\n< Únicos\n23: GuardarVariante(empresaId, ...) >\n< Variante creada"
+
+    ' Margen derecho
+    ent_variante -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

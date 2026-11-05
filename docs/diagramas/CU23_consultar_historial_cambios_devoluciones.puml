@@ -1,0 +1,97 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 70
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU23 Consultar historial de cambios y devoluciones" {
+
+    ' Nodos invisibles para dar altura y margen a los bordes
+    class " " as espaciador1 <<invisible>>
+    class " " as espaciador2 <<invisible>>
+    class "                                       " as espaciadorDerecha <<invisible>>
+    hide espaciador1
+    hide espaciador2
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":ClienteOAdministrador" as actor_historial <<Actor>>
+    class ":InterfazHistorial" as ui_historial <<Interfaz>>
+    class ":ControladorHistorial" as ctrl_historial <<Control>>
+    class ":ServicioHistorial" as svc_historial <<Control>>
+    class ":SolicitudDevolucion" as ent_solicitud <<Entidad>>
+    class ":Venta" as ent_venta <<Entidad>>
+    class ":NotaCambioDevolucion" as ent_nota <<Entidad>>
+    class ":MovimientoInventario" as ent_movimiento <<Entidad>>
+    class ":Usuario/Sucursal" as ent_usuario_sucursal <<Entidad>>
+    class ":ProductoVariante" as ent_variante <<Entidad>>
+    class ":GestorDocumento" as ctrl_documento <<Control>>
+
+    ' Empuje de espacio vertical
+    espaciador1 -[hidden]down-> actor_historial
+    espaciador2 -[hidden]down-> ctrl_historial
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: listado paginado y filtros por ámbito                     '
+    ' ------------------------------------------------------------------ '
+    actor_historial -right- ui_historial : "1: ConsultarHistorial(filtros,\npagina, tamanio) >\n< 10: MostrarListadoPaginado(...)\n11: SeleccionarSolicitud(solicitudId) >\n< 28: MostrarDetalle(...)\n29: DescargarOImprimirNota(notaId,\nformato) >\n< 38: DescargarOImprimirDocumento()"
+
+    ui_historial -right- ctrl_historial : "2: GET /historial/cambios-devoluciones\n?filtros&pagina&tamanio >\n< 9: HistorialOut(...)\n12: GET /historial/{solicitudId} >\n< 27: HistorialDetalleOut(...)\n30: GET /notas/{notaId}/documento\n?formato=... >\n< 37: DocumentoOut(...)"
+
+    ctrl_historial -down- svc_historial : "3: listarHistorial(actorId, rol,\nempresaId, filtros, pagina, tamanio) >\n< 8: HistorialPage(...)\n13: obtenerDetalle(solicitudId,\nactorId, rol, empresaId) >\n< 26: HistorialDetalleOut(...)\n31: obtenerDocumentoNota(notaId,\nactorId, rol, empresaId) >\n< 36: DocumentoOut(...)"
+
+    svc_historial -down- ent_usuario_sucursal : "4: ObtenerRolEmpresaActor(actorId) >\n< 5: Rol, empresa, sucursal,\nclienteId\n14: ValidarAmbito(actor, solicitud) >\n< 15: Permitido | Denegado\n32: ValidarNotaVigenteYAmbito(\nnotaId, actor) >\n< 33: Permitido | Denegado |\nNo emitida"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: consulta paginada de solicitudes                         '
+    ' ------------------------------------------------------------------ '
+    svc_historial -down- ent_solicitud : "6: BuscarSolicitudes(scope, filtros,\norden=fecha_desc, pagina, tamanio) >\n< 7: Página + total (código, tipo,\nfecha, cliente, venta, sucursal,\nestado, prendas, importe, nota)\n| Sin resultados | Filtros inválidos\n| Error -> reintentar\n16: ObtenerDetalleSolicitud(\nsolicitudId) >\n< 17: Solicitud + Detalle + timeline"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: detalle, nota, movimientos y variantes                   '
+    ' ------------------------------------------------------------------ '
+    svc_historial -down- ent_venta : "18: ObtenerVentaOriginal(\nsolicitud.venta_id) >\n< 19: Venta + Detalle + enlace\nal comprobante original"
+
+    svc_historial -down- ent_nota : "20: ObtenerNotaAsociada(solicitudId) >\n< 21: Nota(numero, tipo, fecha,\nimportes, diferencia, estado)\n+ historial anuladas/reemplazadas\n| None"
+
+    svc_historial -down- ent_movimiento : "22: ObtenerMovimientos(solicitudId,\nvarianteIds) >\n< 23: Movimientos(tipo, SKU,\ncantidad, sucursal, fecha,\nusuario, referencia) según rol\n| No disponibles"
+
+    svc_historial -down- ent_variante : "24: ObtenerVariantes(detalle) >\n< 25: SKU, talla, color"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 4: descarga o impresión de la nota                          '
+    ' ------------------------------------------------------------------ '
+    svc_historial -down- ctrl_documento : "34: ObtenerDocumentoPDF(notaId) >\n< 35: PDF / URL de descarga\n| No disponible -> reintentar"
+
+    ' Extensión lateral para garantizar margen libre
+    ctrl_documento -[hidden]right-> espaciadorDerecha
+}
+
+@enduml
