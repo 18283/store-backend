@@ -8,9 +8,14 @@ Flujo (diagrama de robustez):
     GET  /traspasos/{codigo}          -> consulta una solicitud existente
 """
 
+from app.modules.inventario.models import Inventario
+from .models import SolicitudTraspaso
+from datetime import datetime, timezone
+
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, Query, status, HTTPException
+from sqlalchemy import select
 
 from app.core.deps import AuthenticatedUser, SessionDep, require_roles
 from app.modules.identidad.models import RolNombre, Usuario
@@ -280,8 +285,8 @@ def confirmar_recepcion(
         select(SolicitudTraspaso).where(
             SolicitudTraspaso.id == solicitud_id,
             SolicitudTraspaso.empresa_id == ctx["empresa_id"],
-        ).with_for_update().execution_options(populate_existing=True)
-    ).first()
+        ).with_for_update()
+    ).scalars().first()
 
     if solicitud is None:
         raise HTTPException(
@@ -304,7 +309,7 @@ def confirmar_recepcion(
 
     # ---- Paso 4: Validar que el usuario tiene permiso de la sucursal origen ----
     if ctx["rol"] == RolNombre.ENCARGADO:
-        if solicitud.origen_id != ctx["sucursal_asignada_id"]:
+        if solicitud.destino_id != ctx["sucursal_asignada_id"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="SIN_PERMISO_DESPECHO",
@@ -330,7 +335,6 @@ def confirmar_recepcion(
         solicitud.observacion_motivo = observaciones
 
     # 2. Sumar cantidad al inventario de la sucursal de destino
-    from sqlmodel import select
 
     inventario_destino = session.exec(
         select(Inventario).where(
@@ -384,7 +388,7 @@ def confirmar_recepcion(
         ) from exc
 
     session.refresh(solicitud)
-    return _solicitud_out(session, solicitud)
+    return SolicitudTraspasoOut.model_validate(solicitud)
 
 
 # --------------------------------------------------------------------------- #
