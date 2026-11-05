@@ -178,6 +178,19 @@ class DatosEnvioOut(BaseModel):
     observaciones: str | None = None
 
 
+class SolicitudTraspasoConfirmarRecepcionIn(BaseModel):
+    """Datos de entrada para confirmar la recepción de un traspaso."""
+    cantidadRecibida: int = Field(
+        gt=0,
+        description="Cantidad de prendas recibidas en la sucursal de destino",
+    )
+    observaciones: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Observaciones sobre la recepción",
+    )
+
+
 class SolicitudTraspasoDespachoIn(BaseModel):
     """Datos de entrada para el despacho de una solicitud de traspaso."""
     datos_envio: DatosEnvioOut | None = None

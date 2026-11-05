@@ -10,7 +10,7 @@ Flujo (diagrama de robustez):
 
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status, HTTPException
 
 from app.core.deps import AuthenticatedUser, SessionDep, require_roles
 from app.modules.identidad.models import RolNombre, Usuario
@@ -224,6 +224,167 @@ def despachar(
     return service.despachar_traspaso(
         session, user, solicitud_id, datos_envio=datos_envio
     )
+
+
+# --------------------------------------------------------------------------- #
+#  CU27 — Confirmar Recepción de Traspaso
+# --------------------------------------------------------------------------- #
+@router.patch(
+    "/{solicitud_id}/confirmar-recepcion",
+    response_model=SolicitudTraspasoOut,
+)
+def confirmar_recepcion(
+    solicitud_id: int,
+    datos_recepcion: Annotated[
+        dict | None,
+        Body(
+            openapi_examples={
+                "con_datos": {
+                    "value": {
+                        "cantidadRecibida": 1,
+                        "observaciones": "Entrega correcta",
+                    }
+                }
+            }
+        ),
+    ],
+    session: SessionDep,
+    user: EncargadoOrAdminUser,
+) -> SolicitudTraspasoOut:
+    """CU27 — Confirmar recepción de traspaso.
+
+    Valida que la solicitud esté en estado EN_TRANSITO, cambia su estado a
+    RECIBIDO y suma la cantidad recibida al inventario de la sucursal de
+    destino.
+
+    Errores de negocio con `detail.codigo`:
+    - `DESPECHO_INVALIDO`: la solicitud no está en estado EN_TRANSITO.
+    - `SIN_PERMISO_DESPECHO`: el actor no es Encargado o no pertenece a la
+      sucursal de origen.
+    """
+    from fastapi import status
+    from app.modules.inventario.models import MovimientoInventario, TipoMovimiento
+    from app.modules.identidad.models import RolNombre
+
+    # ---- Paso 1: Contexto y permiso de rol ----
+    ctx = service._contexto_usuario(session, actor=user)
+    if not ctx["es_admin"] and ctx["rol"] != RolNombre.ENCARGADO:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SIN_PERMISO_DESPECHO",
+            message="Solo el Encargado de sucursal o Administrador puede confirmar la recepción",
+        )
+
+    # ---- Paso 2: Obtener la solicitud ----
+    solicitud = session.exec(
+        select(SolicitudTraspaso).where(
+            SolicitudTraspaso.id == solicitud_id,
+            SolicitudTraspaso.empresa_id == ctx["empresa_id"],
+        ).with_for_update().execution_options(populate_existing=True)
+    ).first()
+
+    if solicitud is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SOLICITUD_NO_ENCONTRADA",
+            message="Solicitud de traspaso no encontrada",
+        )
+
+    # ---- Paso 3: Validar que esté en estado EN_TRANSITO ----
+    if solicitud.estado != EstadoTraspaso.EN_TRANSITO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DESPECHO_INVALIDO",
+            message=(
+                f"La solicitud no puede confirmarse porque su estado actual es "
+                f"'{solicitud.estado}', no EN_TRANSITO. Es posible que ya fue "
+                "confirmada o procesada previamente."
+            ),
+        )
+
+    # ---- Paso 4: Validar que el usuario tiene permiso de la sucursal origen ----
+    if ctx["rol"] == RolNombre.ENCARGADO:
+        if solicitud.origen_id != ctx["sucursal_asignada_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="SIN_PERMISO_DESPECHO",
+                message="No puede confirmar recepción de un traspaso que no corresponda a su sucursal asignada.",
+            )
+
+    # ---- Paso 5: Obtener los datos de recepción ----
+    cantidad_recibida = datos_recepcion.get("cantidadRecibida") if datos_recepcion else 0
+    observaciones = datos_recepcion.get("observaciones") if datos_recepcion else None
+
+    if cantidad_recibida <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="CANTIDAD_INVALIDA",
+            message="La cantidad recibida debe ser mayor que cero",
+        )
+
+    # ---- Paso 6: Cambiar estado a RECIBIDO y actualizar inventario ----
+    # 1. Actualizar estado de la solicitud
+    solicitud.estado = EstadoTraspaso.RECIBIDO
+    solicitud.fecha_decision = datetime.now(timezone.utc)
+    if observaciones:
+        solicitud.observacion_motivo = observaciones
+
+    # 2. Sumar cantidad al inventario de la sucursal de destino
+    from sqlmodel import select
+
+    inventario_destino = session.exec(
+        select(Inventario).where(
+            Inventario.variante_id == solicitud.variante_id,
+            Inventario.sucursal_id == solicitud.destino_id,
+        ).with_for_update().execution_options(populate_existing=True)
+    ).first()
+
+    if inventario_destino is None:
+        # Crear registro de inventario si no existe para la sucursal destino
+        from app.modules.sucursales.models import Sucursal
+        sucursal_destino = session.get(Sucursal, solicitud.destino_id)
+        if sucursal_destino is None or not sucursal_destino.activa:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="SUCURSAL_DESTINO_INACTIVA",
+                message="La sucursal de destino está inactiva",
+            )
+        inventario_destino = Inventario(
+            variante_id=solicitud.variante_id,
+            sucursal_id=solicitud.destino_id,
+            cantidad_disponible=cantidad_recibida,
+            cantidad_reservada=0,
+        )
+        session.add(inventario_destino)
+    else:
+        # Sumar a la cantidad disponible existente
+        inventario_destino.cantidad_disponible += cantidad_recibida
+
+    session.add(inventario_destino)
+
+    # 3. Registrar movimiento de inventario ENTRADA_TRASPASO
+    movimiento = MovimientoInventario(
+        variante_id=solicitud.variante_id,
+        sucursal_id=solicitud.destino_id,
+        usuario_id=user.id,
+        tipo="ENTRADA_TRASPASO",
+        cantidad=cantidad_recibida,
+        nota=f"Confirmación recepción solicitud {solicitud.codigo}",
+    )
+    session.add(movimiento)
+
+    try:
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ERROR_GUARDAR_RECEPCION",
+            message="No se pudo guardar la confirmación de recepción",
+        ) from exc
+
+    session.refresh(solicitud)
+    return _solicitud_out(session, solicitud)
 
 
 # --------------------------------------------------------------------------- #
