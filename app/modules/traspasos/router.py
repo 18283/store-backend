@@ -276,8 +276,7 @@ def confirmar_recepcion(
     if not ctx["es_admin"] and ctx["rol"] != RolNombre.ENCARGADO:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="SIN_PERMISO_DESPECHO",
-            message="Solo el Encargado de sucursal o Administrador puede confirmar la recepción",
+            detail="Solo el Encargado de sucursal o Administrador puede confirmar la recepción",
         )
 
     # ---- Paso 2: Obtener la solicitud ----
@@ -291,20 +290,18 @@ def confirmar_recepcion(
     if solicitud is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="SOLICITUD_NO_ENCONTRADA",
-            message="Solicitud de traspaso no encontrada",
+            detail="Solicitud de traspaso no encontrada",
         )
 
     # ---- Paso 3: Validar que esté en estado EN_TRANSITO ----
     if solicitud.estado != EstadoTraspaso.EN_TRANSITO:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="DESPECHO_INVALIDO",
-            message=(
+            detail=(
                 f"La solicitud no puede confirmarse porque su estado actual es "
                 f"'{solicitud.estado}', no EN_TRANSITO. Es posible que ya fue "
                 "confirmada o procesada previamente."
-            ),
+            )
         )
 
     # ---- Paso 4: Validar que el usuario tiene permiso de la sucursal origen ----
@@ -312,8 +309,7 @@ def confirmar_recepcion(
         if solicitud.destino_id != ctx["sucursal_asignada_id"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="SIN_PERMISO_DESPECHO",
-                message="No puede confirmar recepción de un traspaso que no corresponda a su sucursal asignada.",
+                detail="No puede confirmar recepción de un traspaso que no corresponda a su sucursal asignada.",
             )
 
     # ---- Paso 5: Obtener los datos de recepción ----
@@ -323,8 +319,7 @@ def confirmar_recepcion(
     if cantidad_recibida <= 0:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="CANTIDAD_INVALIDA",
-            message="La cantidad recibida debe ser mayor que cero",
+            detail="La cantidad recibida debe ser mayor que cero",
         )
 
     # ---- Paso 6: Cambiar estado a RECIBIDO y actualizar inventario ----
@@ -341,7 +336,7 @@ def confirmar_recepcion(
             Inventario.variante_id == solicitud.variante_id,
             Inventario.sucursal_id == solicitud.destino_id,
         ).with_for_update().execution_options(populate_existing=True)
-    ).first()
+    ).scalars().first()  # <--- ¡AGREGA EL .scalars() AQUÍ!
 
     if inventario_destino is None:
         # Crear registro de inventario si no existe para la sucursal destino
@@ -350,8 +345,7 @@ def confirmar_recepcion(
         if sucursal_destino is None or not sucursal_destino.activa:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="SUCURSAL_DESTINO_INACTIVA",
-                message="La sucursal de destino está inactiva",
+                detail="La sucursal de destino está inactiva",
             )
         inventario_destino = Inventario(
             variante_id=solicitud.variante_id,
@@ -383,8 +377,7 @@ def confirmar_recepcion(
         session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ERROR_GUARDAR_RECEPCION",
-            message="No se pudo guardar la confirmación de recepción",
+            detail="No se pudo guardar la confirmación de recepción",
         ) from exc
 
     session.refresh(solicitud)
