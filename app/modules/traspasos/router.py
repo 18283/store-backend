@@ -386,6 +386,25 @@ def confirmar_recepcion(
         ) from exc
 
     session.refresh(solicitud)
+
+    # CU29 — Notificar al cliente y a los administradores
+    from app.modules.traspasos.notificacion_service import crear_notificacion, crear_notificacion_para_roles
+    crear_notificacion(
+        session=session,
+        usuario_id=solicitud.solicitante_id,
+        mensaje=f"Tu solicitud de traspaso {solicitud.codigo} ha sido RECIBIDA en destino.",
+        tipo="success",
+        codigo_traspaso=solicitud.codigo,
+    )
+    crear_notificacion_para_roles(
+        session=session,
+        roles=[RolNombre.ADMINISTRADOR],
+        mensaje=f"El traspaso {solicitud.codigo} fue confirmado como recibido.",
+        tipo="info",
+        codigo_traspaso=solicitud.codigo,
+        empresa_id=solicitud.empresa_id,
+    )
+
     return SolicitudTraspasoOut.model_validate(solicitud)
 
 

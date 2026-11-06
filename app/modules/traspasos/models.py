@@ -29,7 +29,16 @@ class EstadoTraspaso:
     TODOS = (PENDIENTE, APROBADA, RECHAZADA, EN_TRANSITO, RECIBIDO)
 
 
-class SolicitudTraspaso(SQLModel, table=True):
+class Notificacion(SQLModel, table=True):
+    __tablename__ = "notificacion"
+
+    id: int | None = Field(default=None, primary_key=True)
+    usuario_id: int = Field(foreign_key="usuario.id", index=True)  # El destinatario
+    mensaje: str = Field(max_length=500)
+    tipo: str = Field(default="info", max_length=20)  # 'success' | 'info' | 'warning' | 'error'
+    leida: bool = Field(default=False)
+    codigo_traspaso: str | None = Field(default=None, max_length=30, index=True)
+    fecha: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     __tablename__ = "solicitud_traspaso"
     __table_args__ = (
         UniqueConstraint("empresa_id", "codigo", name="uq_traspaso_empresa_codigo"),
