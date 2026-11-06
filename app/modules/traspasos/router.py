@@ -124,7 +124,7 @@ def listar_pendientes(
 @router.get("", response_model=SolicitudTraspasoPage)
 def listar_todas(
     session: SessionDep,
-    user: TraspasoUser,
+    user: EncargadoOrAdminUser,
     estado: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
