@@ -1,0 +1,87 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 150
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU28 Consultar seguimiento de traspaso" {
+
+    ' Nodo invisible para dar margen derecho
+    class " " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":Cliente" as actor_cliente <<actor>>
+    class ":InterfazConsulta" as ui_consulta <<boundary>>
+    class ":ControladorTraspaso" as ctrl_traspaso <<control>>
+    class ":SolicitudTraspaso" as ce_solicitud <<entity>>
+    class ":DAOTraspaso" as ce_dao <<entity>>
+    class ":BaseDeDatos" as bd_datos <<database>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_cliente -down- ui_consulta : "1: IngresarCódigoID() >\n< 2: MostrarResultado()"
+
+    ui_consulta -down- ctrl_traspaso : "3: ConsultarSolicitud(códigoID, rol) >\n< 4: DevolverDatosSolicitud()"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de permisos            '
+    ' ------------------------------------------------------------------ '
+    ctrl_traspaso -right- ce_dao : "5: BuscarPorIDOCódigo(id, codigo, empresaId) >\n< 6: SolicitudTraspaso\n7: ValidarPermisos(rol, sucursal) >\n< Válido\nNo Válido"
+
+    ctrl_traspaso -down- actor_cliente : "8: FiltrarPorRol(resultado, rol)"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: consulta a base de datos                                  '
+    ' ------------------------------------------------------------------ '
+    ce_dao -down- bd_datos : "9: SELECT * FROM solicitud_traspaso WHERE id = :id OR codigo = :codigo AND empresa_id = :empresaId"
+
+    ' Margen derecho
+    bd_datos -[hidden]right-> espaciadorDerecha
+
+    ' ------------------------------------------------------------------ '
+    ' NIVEL ALTERNATIVO: Flujos A1-A4                                   '
+    ' ------------------------------------------------------------------ '
+    alt A1: Solicitud no encontrada
+        ce_dao -> actor_cliente : A1-1: 404 Not Found >\n< Código SOLICITUD_NO_ENCONTRADA
+    else A2: Sin permisos
+        ce_dao -> actor_cliente : A2-1: 403 Forbidden >\n< Código SIN_PERMISO
+    else A3: Filtro estado inválido (resultado vacío)
+        ce_dao -> actor_cliente : A3-1: Resultado vacío >\n< Sin error,lista vacía
+    else A4: Admin sin filtros (todas empresa)
+        ce_dao -> actor_cliente : A4-1: Todas las solicitudes empresa >\n< Sin filtros estado/código
+    end
+
+    ' Poscondición final
+    note right: Poscondición: Sin modificar inventario central\nni estado de solicitud en BD
+}
+
+@enduml

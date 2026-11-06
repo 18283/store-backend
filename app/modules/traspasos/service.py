@@ -901,44 +901,69 @@ def procesar_decision(
 def consultar_traspaso(
     session: Session, actor: Usuario, codigo: str
 ) -> dict:
-    """Paso 35 (consulta): recupera una solicitud existente por su código.
+    """CU28 — Consultar seguimiento de traspaso.
+
+    Consultar estado solicitado, aprobado, enviado, recibido o cancelado.
+    Actores: Cliente, Encargado de sucursal.
 
     El Administrador ve cualquiera de su empresa; el Cliente solo ve las suyas;
     el Encargado, las que salen o llegan a su sucursal. Siempre dentro de la
     empresa del actor.
+
+    Parámetro `codigo`:
+    - Si es numérico puro: busca por ID interno de la base de datos.
+    - Si es texto: busca por código legible (TRP-...).
+
+    Retorna diccionario con datos formateados: resumen, prenda, origen,
+    destino, cantidades, estados, datos de envío, etc.
     """
     ctx = _contexto_usuario(session, actor)
+    empresa_id = ctx["empresa_id"]
+
+    # Búsqueda: ID numérico o código textual
+    codigo_strip = codigo.strip()
+    is_digit = codigo_strip.isdigit()
+
     solicitud = session.exec(
         select(SolicitudTraspaso).where(
-            SolicitudTraspaso.empresa_id == ctx["empresa_id"],
+            SolicitudTraspaso.empresa_id == empresa_id,
             or_(
-                SolicitudTraspaso.id == int(codigo.strip()),
-                func.upper(SolicitudTraspaso.codigo) == codigo.strip().upper(),
-            )
-            if codigo.strip().isdigit()
-            else func.upper(SolicitudTraspaso.codigo) == codigo.strip().upper(),
+                SolicitudTraspaso.id == int(codigo_strip) if is_digit else True,
+                func.upper(SolicitudTraspaso.codigo) == codigo_strip.upper() if not is_digit else True,
+            ),
         )
     ).first()
+
+    # Si es búsqueda por ID numérico, filtrar directamente
+    if is_digit:
+        solicitud = session.get(SolicitudTraspaso, int(codigo_strip))
+
     if solicitud is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "Solicitud de traspaso no encontrada"
         )
 
+    # --- Filtrado por rol (según especificación CU28) ---
     if ctx["es_admin"] or ctx["es_superadmin"]:
-        pass
+        pass  # Admin ve todo de la empresa
     elif ctx["rol"] == RolNombre.CLIENTE:
+        # Cliente solo puede consultar sus propias solicitudes
         if solicitud.solicitante_id != actor.id:
             raise HTTPException(
-                status.HTTP_403_FORBIDDEN, "Esta solicitud es de otro cliente"
+                status.HTTP_403_FORBIDDEN,
+                "SIN_PERMISO",
+                "Esta solicitud es de otro cliente",
             )
     else:
+        # Encargado: solo puede consultar solicitudes donde su sucursal sea origen o destino
         if ctx["sucursal_asignada_id"] not in (
             solicitud.origen_id,
             solicitud.destino_id,
         ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                "Esta solicitud no corresponde a tu sucursal",
+                "SIN_PERMISO",
+                "Esta solicitud no corresponde a tu sucursal asignada",
             )
 
     return _solicitud_out(session, solicitud)

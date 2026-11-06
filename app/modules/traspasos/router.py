@@ -124,12 +124,17 @@ def listar_pendientes(
 @router.get("", response_model=SolicitudTraspasoPage)
 def listar_todas(
     session: SessionDep,
-    user: EncargadoOrAdminUser,
+    user: TraspasoUser,
     estado: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=100),
 ):
-    """Muestra todas las solicitudes de la empresa con filtro opcional de estado."""
+    """Muestra todas las solicitudes de la empresa con filtro opcional de estado.
+
+    - Si es Administrador o Superadmin, ve todas las de la empresa.
+    - Si es EncargadoSucursal, ve las que corresponden a su sucursal (origen o destino).
+    - Si es Cliente, ve solo las suyas (filtrado automáticamente por service.listar_solicitudes).
+    """
     items, total = service.listar_solicitudes(
         session, user, estado=estado, page=page, size=size
     )

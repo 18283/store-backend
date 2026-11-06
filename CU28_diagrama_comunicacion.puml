@@ -1,0 +1,93 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+skinparam linetype polyline
+
+skinparam frameMargin 40
+
+hide members
+hide circle
+
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Diagrama de Comunicación UML 2.5 / 2.5.1
+' (reorganiza el mismo contenido del sequence diagram en objetos y links)
+
+' ===== CONFIGURACIÓN DE OBJETOS Y LINKS =====
+
+' Definición de objetos (rectángulos)
+object ":Cliente" as actor_cliente
+object ":InterfazConsulta" as ci_consulta
+object ":ControladorTraspaso" as cc_controlador
+object ":SolicitudTraspaso" as ce_solicitud
+object ":DAOTraspaso" as ce_dao
+object ":BaseDeDatos" as bd_datos
+
+' Definición de links (líneas de conexión entre objetos)
+link L1 between actor_cliente and ci_consulta
+link L2 between ci_consulta and cc_controlador
+link L3 between cc_controlador and ce_solicitud
+link L4 between cc_controlador and ce_dao
+link L5 between ce_dao and bd_datos
+
+' ===== ESTRUCTURA DEL DIAGRAMA DE COMUNICACIÓN =====
+
+' Actor -> Interfaz: Ingresar código o ID
+actor_cliente -> ci_consulta : 1. IngresarCódigoID() 
+ci_consulta -> actor_cliente : 2. MostrarResultado()
+
+' Interfaz -> Controlador: Consultar solicitud
+ci_consulta -> cc_controlador : 3. ConsultarSolicitud(códigoID)
+cc_controlador -> ci_consulta : 4. DevolverDatosSolicitud()
+
+' Controlador -> Solicitud (entidad): Buscar por ID o código
+cc_controlador -> ce_solicitud : 5. BuscarPorIDOCódigo(id, codigo)
+
+' Controlador -> DAO: Ejecutar consulta
+cc_controlador -> ce_dao : 6. BuscarPorIDOCódigo(id, codigo)
+
+' DAO -> Base de Datos: Consulta SQL
+ce_dao -> bd_datos : 7. SELECT * FROM solicitud_traspaso WHERE id = :id OR codigo = :codigo
+
+' --- FLUJOS ALTERNATIVOS CON CONDICIONALES ---
+
+' Nota: Los flujos alternativos se muestran con condiciones en los links
+
+' A1: Solicitud no encontrada
+ce_dao -> actor_cliente : A1. 404 Not Found (SOLICITUD_NO_ENCONTRADA)
+ce_dao -> actor_cliente : A1-1. Código: SOLICITUD_NO_ENCONTRADA
+
+' A2: Sin permisos
+ce_dao -> actor_cliente : A2. 403 Forbidden (SIN_PERMISO)
+ce_dao -> actor_cliente : A2-1. Código: SIN_PERMISO
+
+' A3: Filtro por estado inválido (resultado vacío)
+ce_dao -> actor_cliente : A3. Resultado vacío
+ce_dao -> actor_cliente : A3-1. Sin error, lista vacía
+
+' A4: Admin sin filtros (todas las solicitudes)
+ce_dao -> actor_cliente : A4. Todas las solicitudes empresa
+ce_dao -> actor_cliente : A4-1. Sin filtros de estado/código
+
+' ===== NOTA FINAL =====
+note right
+Poscondición: Sin modificar inventario central
+ni estado de la solicitud en BD
+end note
+
+@enduml
