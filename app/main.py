@@ -56,6 +56,7 @@ from app.modules.reservas.router import router as reservas_router  # noqa: E402
 from app.modules.saas.router import router as saas_router  # noqa: E402
 from app.modules.sucursales.router import router as sucursales_router  # noqa: E402
 from app.modules.traspasos.router import router as traspasos_router  # noqa: E402
+from app.modules.traspasos.notificacion_router import router as notificacion_router  # noqa: E402
 from app.modules.ventas.carrito_router import router as carrito_router  # noqa: E402
 from app.modules.ventas.ventas_router import router as ventas_router  # noqa: E402
 
@@ -77,3 +78,4 @@ app.include_router(reportes_router)
 app.include_router(saas_router)
 app.include_router(cambios_router)
 app.include_router(traspasos_router)
+app.include_router(notificacion_router)
