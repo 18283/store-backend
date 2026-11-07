@@ -629,7 +629,7 @@ def solicitar_traspaso(
         session.refresh(solicitud)
         
         # CU29 — Notificar a los administradores de la empresa
-        from app.modules.traspasos.notificacion_service import crear_notificacion_para_roles
+        from app.modules.traspasos.notificacion_service import crear_notificacion_para_roles_segura as crear_notificacion_para_roles
         crear_notificacion_para_roles(
             session=session,
             roles=[RolNombre.ADMINISTRADOR],
@@ -637,6 +637,7 @@ def solicitar_traspaso(
             tipo="info",
             codigo_traspaso=solicitud.codigo,
             empresa_id=empresa_id,
+            modulo="traspasos",
         )
 
         return _solicitud_out(session, solicitud)
@@ -909,7 +910,7 @@ def procesar_decision(
     session.refresh(solicitud)
 
     # CU29 — Notificar tras decisión (aprobar/rechazar)
-    from app.modules.traspasos.notificacion_service import crear_notificacion
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura as crear_notificacion
     if es_aprobacion:
         # Notificar al cliente solicitante
         crear_notificacion(
@@ -918,6 +919,7 @@ def procesar_decision(
             mensaje=f"Tu solicitud de traspaso {solicitud.codigo} ha sido APROBADA.",
             tipo="success",
             codigo_traspaso=solicitud.codigo,
+            modulo="traspasos",
         )
         # Buscar encargado de la sucursal de origen para notificarle
         encargado_origen = session.exec(
@@ -933,6 +935,7 @@ def procesar_decision(
                 mensaje=f"El traspaso {solicitud.codigo} (origen en tu sucursal) fue aprobado y está listo para despachar.",
                 tipo="info",
                 codigo_traspaso=solicitud.codigo,
+                modulo="traspasos",
             )
     else:
         # Notificar rechazo al cliente
@@ -942,6 +945,7 @@ def procesar_decision(
             mensaje=f"Tu solicitud de traspaso {solicitud.codigo} ha sido RECHAZADA. Motivo: {observacion_motivo}",
             tipo="warning",
             codigo_traspaso=solicitud.codigo,
+            modulo="traspasos",
         )
 
     return _solicitud_out(session, solicitud)
@@ -1328,13 +1332,14 @@ def despachar_traspaso(
     print(f"[DEBUG DESPACHO] =========================================\n")
 
     # CU29 — Notificar al cliente solicitante y al encargado de la sucursal de destino
-    from app.modules.traspasos.notificacion_service import crear_notificacion
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura as crear_notificacion
     crear_notificacion(
         session=session,
         usuario_id=solicitud.solicitante_id,
         mensaje=f"Tu solicitud de traspaso {solicitud.codigo} está EN TRÁNSITO.",
         tipo="info",
         codigo_traspaso=solicitud.codigo,
+        modulo="traspasos",
     )
     # Buscar encargado de la sucursal de destino
     encargado_destino = session.exec(
@@ -1350,6 +1355,7 @@ def despachar_traspaso(
             mensaje=f"El traspaso {solicitud.codigo} viene en camino hacia tu sucursal.",
             tipo="info",
             codigo_traspaso=solicitud.codigo,
+            modulo="traspasos",
         )
 
     # ---- Paso 11: Devolver respuesta ----

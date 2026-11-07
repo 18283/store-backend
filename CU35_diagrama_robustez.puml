@@ -1,0 +1,106 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 150
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU35 Consultar centro de notificaciones" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":Cliente" as actor_cliente <<actor>>
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":EncargadoSucursal" as actor_encargado <<actor>>
+    class ":Cajero" as actor_cajero <<actor>>
+    class ":InterfazNotificaciones" as ui_notificaciones <<boundary>>
+    class ":ControladorNotificaciones" as ctrl_notificaciones <<control>>
+    class ":ServicioNotificaciones" as svc_notificaciones <<control>>
+    class ":Usuario" as ent_usuario <<entity>>
+    class ":Rol" as ent_rol <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+    class ":Notificacion" as ent_notificacion <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_admin -down- ui_notificaciones : "1: EnviarDifusion(mensaje, tipo, roles_destino) >\n< 12: ConfirmarEnviados(N)\n13: IngresarCentroNotificaciones() >\n< 14: CerrarCentro()"
+
+    actor_cliente -down- ui_notificaciones : "1: AbrirCentroNotificaciones() >\n< 6: MostrarNotificaciones(items, total)\n7: MarcarLeida(id) / MarcarTodasLeidas() >\n< 8: ConfirmarMarcado()"
+
+    actor_encargado -down- ui_notificaciones : "1: AbrirCentroNotificaciones() >\n< 6: MostrarNotificaciones(items, total)\n7: MarcarLeida(id) >\n< 8: ConfirmarMarcado()"
+
+    actor_cajero -down- ui_notificaciones : "1: AbrirCentroNotificaciones() >\n< 6: MostrarNotificaciones(items, total)"
+
+    ui_notificaciones -down- ctrl_notificaciones : "2: AbrirCentro(JWT) >\n< 5: PaginaNotificaciones\n3: GET /notificaciones(leidas, page, size) >\n< 6: PaginaNotificaciones\n7: PATCH /notificaciones/{id}/leer >\n< 8: NotificacionLeida\n7: PATCH /notificaciones/leer-todas >\n< 8: marcadas\n9: POST /notificaciones/masiva {mensaje, tipo, roles_destino} >\n< 12: {enviados: N}"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de empresa y rol      '
+    ' ------------------------------------------------------------------ '
+    ctrl_notificaciones -right- svc_notificaciones : "3: ListarPropias(usuario_id, leidas, page, size) >\n< 4: Notificaciones pagina ordenadas fecha DESC\n7: MarcarLeida(id, usuario_id) >\n< 8: Actualizada\n7: MarcarTodasLeidas(usuario_id) >\n< 8: marcadas\n11: CrearMasiva(mensaje, tipo, roles_destino, empresa_id) >\n< 12: {enviados: N}"
+
+    ctrl_notificaciones -down- ent_usuario : "2: require_roles(Cliente, Administrador, EncargadoSucursal, Cajero) + usuario activo >\n< Usuario activo"
+    ctrl_notificaciones -down- ent_empresa : "2: validar empresa activa >\n< Empresa activa"
+    ctrl_notificaciones -down- ent_rol : "10: ValidarRolesDestino(roles_destino) + require_roles(Administrador) para masiva >\n< Roles válidos / 403"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: entidades y validaciones del tenant                      '
+    ' ------------------------------------------------------------------ '
+    svc_notificaciones -down- ent_notificacion : "4: SELECT notificacion WHERE usuario_id=actor.id ORDER BY fecha DESC LIMIT size OFFSET (page-1)*size >\n< items, total\n5: FiltrarLeidas(leidas) (si aplica) >\n< filtradas\n7: UPDATE notificacion SET leida=True WHERE id=:id AND usuario_id=actor.id >\n< 1 fila / 404\n7: UPDATE notificacion SET leida=True WHERE usuario_id=actor.id AND leida=False >\n< N filas"
+
+    svc_notificaciones -down- ent_usuario : "11: BuscarDestinatarios(roles_destino, empresa_id, activo=True) >\n< usuarios\nCrearNotificacionPorUsuario(mensaje, tipo, modulo) >\n< N creadas"
+
+    svc_notificaciones -down- ent_notificacion : "11: INSERT notificacion (usuario_id, mensaje, tipo, modulo, leida=False, codigo_traspaso, fecha=now) >\n< N filas"
+
+    ' ------------------------------------------------------------------ '
+    ' NIVEL ALTERNATIVO: Flujos A1-A8                                  '
+    ' ------------------------------------------------------------------ '
+    alt A1: Sin notificaciones / A2: Filtro sin resultados
+        ctrl_notificaciones -> ui_notificaciones : A1/A2-1: total=0 >\n< MostrarListaVacia()
+    else A3: Notificación ajena o inexistente
+        ctrl_notificaciones -> ui_notificaciones : A3-1: 404 Notificación no encontrada o no pertenece a este usuario >\n< MostrarError()
+    else A4: Usuario inactivo / empresa suspendida / sin sesión
+        ctrl_notificaciones -> ui_notificaciones : A4-1: 403 Acceso denegado >\n< MostrarErrorAcceso()
+    else A5: Sin permiso para masiva
+        ctrl_notificaciones -> ui_notificaciones : A5-1: 403 Solo Administrador puede enviar difusión >\n< MostrarErrorPermiso()
+    else A6: Datos inválidos de masiva
+        ctrl_notificaciones -> ui_notificaciones : A6-1: 422 Mensaje vacío / tipo inválido / roles_destino vacío >\n< MostrarErrorValidacion()
+    else A7: Sin destinatarios
+        svc_notificaciones -> ctrl_notificaciones : A7-1: {enviados: 0} >\n< MostrarSinDestinatarios()
+    else A8: Error de servicio
+        ctrl_notificaciones -> ui_notificaciones : A8-1: 500 Error base de datos >\n< MostrarErrorServicio()
+
+    ' Margen derecho
+    ent_notificacion -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

@@ -125,7 +125,7 @@ def preparar_datos(
     ahora = datetime.now(timezone.utc)
     lista = list(productos.values())
     total_variantes = sum(len(item.variantes) for item in lista)
-    return DatosOfflineOut(
+    resultado = DatosOfflineOut(
         version_datos=f"1-{usuario.empresa_id}-{sucursal.id}-{int(ahora.timestamp())}",
         empresa_id=usuario.empresa_id,
         sucursal_id=sucursal.id,
@@ -135,6 +135,17 @@ def preparar_datos(
         total_productos=len(lista),
         total_variantes=total_variantes,
     )
+    # CU35 — Avisar sincronización del catálogo offline (opcional).
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=usuario.id,
+        mensaje=f"Catálogo offline sincronizado ({len(lista)} productos).",
+        tipo="info",
+        modulo="sincronizacion",
+    )
+    return resultado
 
 
 def _exigir_acceso_offline(session: Session, usuario: Usuario) -> None:
@@ -255,6 +266,15 @@ def sincronizar_reserva(
         push.enviar_push_a_usuario(
             session, usuario.id, "No se pudo confirmar tu reserva", motivo, {"tipo": "reserva"}
         )
+        from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+        crear_notificacion_segura(
+            session=session,
+            usuario_id=usuario.id,
+            mensaje=f"No se pudo confirmar tu reserva sincronizada: {motivo}",
+            tipo="warning",
+            modulo="sincronizacion",
+        )
         return _resultado_de(op)
 
     op = _registrar_operacion(
@@ -271,6 +291,15 @@ def sincronizar_reserva(
         "Reserva confirmada",
         "Tu reserva hecha sin conexión se confirmó correctamente.",
         {"tipo": "reserva", "reserva_id": str(reserva_out["id"])},
+    )
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=usuario.id,
+        mensaje="Tu reserva hecha sin conexión se confirmó correctamente.",
+        tipo="success",
+        modulo="sincronizacion",
     )
     return _resultado_de(op)
 
@@ -371,6 +400,15 @@ def sincronizar_venta(
         )
         push.enviar_push_a_usuario(
             session, usuario.id, "No se pudo completar tu compra", motivo, {"tipo": "venta"}
+        )
+        from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+        crear_notificacion_segura(
+            session=session,
+            usuario_id=usuario.id,
+            mensaje=f"No se pudo completar tu compra sincronizada: {motivo}",
+            tipo="warning",
+            modulo="sincronizacion",
         )
         return _resultado_de(op)
 
@@ -501,5 +539,14 @@ def sincronizar_venta(
         "Compra confirmada",
         "Tu compra hecha sin conexión se completó y ya se cobró a tu tarjeta.",
         {"tipo": "venta", "venta_id": str(venta.id)},
+    )
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=usuario.id,
+        mensaje="Tu compra hecha sin conexión se completó y ya se cobró a tu tarjeta.",
+        tipo="success",
+        modulo="sincronizacion",
     )
     return _resultado_de(op)

@@ -472,6 +472,25 @@ def resolver(
     session.add(s)
     session.commit()
     session.refresh(s)
+    # CU35 — Avisar al Cliente si su cambio/devolución fue aprobado o rechazado.
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    if data.accion == TipoSolicitud.CAMBIO:
+        crear_notificacion_segura(
+            session=session,
+            usuario_id=s.cliente_id,
+            mensaje=f"Tu cambio #{s.id} fue aprobado y resuelto.",
+            tipo="success",
+            modulo="cambios",
+        )
+    else:
+        crear_notificacion_segura(
+            session=session,
+            usuario_id=s.cliente_id,
+            mensaje=f"Tu devolución #{s.id} fue aprobada y resuelta.",
+            tipo="success",
+            modulo="devoluciones",
+        )
     return ResolverSolicitudOut(solicitud=_solicitud_out(session, s))
 
 
@@ -549,6 +568,16 @@ def confirmar_cobro_diferencia(
     session.add(s)
     session.commit()
     session.refresh(s)
+    # CU35 — Confirmar al Cliente que su cambio fue aprobado (cobro confirmado).
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=s.cliente_id,
+        mensaje=f"Tu cambio #{s.id} fue aprobado y resuelto.",
+        tipo="success",
+        modulo="cambios",
+    )
     return _solicitud_out(session, s)
 
 

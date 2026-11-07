@@ -65,6 +65,21 @@ class SolicitudTraspaso(SQLModel, table=True):
     observaciones_despacho: str | None = Field(default=None, max_length=255)
 
 
+class ModuloNotificacion:
+    """Origen del aviso dentro del centro de notificaciones (CU35)."""
+
+    TRASPASOS = "traspasos"
+    RESERVAS = "reservas"
+    CAMBIOS = "cambios"
+    DEVOLUCIONES = "devoluciones"
+    SINCRONIZACION = "sincronizacion"
+    SUSCRIPCION = "suscripcion"
+    MASIVA = "masiva"
+    GENERAL = "general"
+
+    TODOS = (TRASPASOS, RESERVAS, CAMBIOS, DEVOLUCIONES, SINCRONIZACION, SUSCRIPCION, MASIVA, GENERAL)
+
+
 class Notificacion(SQLModel, table=True):
     __tablename__ = "notificacion"
 
@@ -74,4 +89,5 @@ class Notificacion(SQLModel, table=True):
     tipo: str = Field(default="info", max_length=20)
     leida: bool = Field(default=False)
     codigo_traspaso: str | None = Field(default=None, max_length=30, index=True)
+    modulo: str | None = Field(default=None, max_length=30, index=True)
     fecha: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -400,6 +400,17 @@ def gestionar_suscripcion(
         session.add(empresa)
         session.commit()
         session.refresh(actual)
+        # CU35 — Avisar a los Administradores de la empresa.
+        from app.modules.traspasos.notificacion_service import crear_notificacion_para_roles_segura
+
+        crear_notificacion_para_roles_segura(
+            session=session,
+            roles=[RolNombre.ADMINISTRADOR],
+            mensaje=f"Tu suscripción fue actualizada (estado: {actual.estado}, vence {actual.fecha_vencimiento}).",
+            tipo="info",
+            empresa_id=empresa.id,
+            modulo="suscripcion",
+        )
         return actual
     except Exception:
         session.rollback()
@@ -654,6 +665,18 @@ def cambiar_o_renovar_plan(
         session.commit()
         session.refresh(actual)
         session.refresh(historial)
+        # CU35 — Avisar renovación/cambio de plan a los Administradores.
+        from app.modules.traspasos.notificacion_service import crear_notificacion_para_roles_segura
+
+        _tipo = "renovada" if vista.tipo_cambio == "RENOVACION" else "actualizada"
+        crear_notificacion_para_roles_segura(
+            session=session,
+            roles=[RolNombre.ADMINISTRADOR],
+            mensaje=f"Tu suscripción fue {_tipo} (vence {actual.fecha_vencimiento}).",
+            tipo="success",
+            empresa_id=empresa_id,
+            modulo="suscripcion",
+        )
         return _cambio_out(session, historial, actual, idempotente=False)
     except IntegrityError as exc:
         session.rollback()
@@ -753,12 +776,39 @@ def get_plan_consumo(session: Session, empresa_id: int) -> PlanConsumoOut:
                     error=str(exc),
                 )
             )
+    dias_restantes = max((suscripcion.fecha_vencimiento - date.today()).days, 0)
+    # CU35 — Aviso de vencimiento próximo (<= 7 días), una vez por día.
+    if dias_restantes <= 7:
+        try:
+            from app.modules.traspasos.models import Notificacion
+            from app.modules.traspasos.notificacion_service import (
+                crear_notificacion_para_roles_segura,
+            )
+
+            _mensaje = f"Tu plan vence en {dias_restantes} día(s) (vencimiento {suscripcion.fecha_vencimiento})."
+            _ya_avisado = session.exec(
+                select(Notificacion).where(
+                    Notificacion.modulo == "suscripcion",
+                    Notificacion.mensaje == _mensaje,
+                )
+            ).first()
+            if _ya_avisado is None:
+                crear_notificacion_para_roles_segura(
+                    session=session,
+                    roles=[RolNombre.ADMINISTRADOR],
+                    mensaje=_mensaje,
+                    tipo="warning",
+                    empresa_id=empresa.id,
+                    modulo="suscripcion",
+                )
+        except Exception:  # noqa: BLE001 - el aviso no rompe la consulta
+            session.rollback()
     return PlanConsumoOut(
         empresa_id=empresa.id,
         empresa_nombre=empresa.nombre,
         plan=plan_out,
         suscripcion=to_suscripcion_out(session, suscripcion),
-        dias_restantes=max((suscripcion.fecha_vencimiento - date.today()).days, 0),
+        dias_restantes=dias_restantes,
         funcionalidades=plan_out.funcionalidades,
         consumos=consumos,
     )

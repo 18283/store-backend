@@ -250,6 +250,16 @@ def crear_reserva(
 
     session.commit()
     session.refresh(reserva)
+    # CU35 — Avisar al Cliente en el centro de notificaciones.
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=cliente_id,
+        mensaje=f"Tu reserva #{reserva.id} fue creada para el {reserva.fecha} a las {reserva.hora_inicio}.",
+        tipo="success",
+        modulo="reservas",
+    )
     return _reserva_out(session, reserva)
 
 
@@ -306,6 +316,16 @@ def cancelar_reserva(session: Session, cliente_id: int, reserva_id: int) -> dict
     session.add(reserva)
     session.commit()
     session.refresh(reserva)
+    # CU35 — Avisar al Cliente de la cancelación.
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=cliente_id,
+        mensaje=f"Tu reserva #{reserva.id} fue cancelada.",
+        tipo="warning",
+        modulo="reservas",
+    )
     return _reserva_out(session, reserva)
 
 
