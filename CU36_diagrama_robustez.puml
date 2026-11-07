@@ -1,0 +1,104 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+
+' Trazado de líneas rectas
+skinparam linetype polyline
+
+' Espaciado interno y separación entre nodos
+skinparam frameMargin 40
+skinparam nodesep 150
+skinparam ranksep 70
+
+hide members
+hide circle
+
+' Estilo estricto 2D para rectángulos UML 2.5
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+' Marco de Interacción UML 2.5 / 2.5.1
+frame "sd CU36 Consultar alertas y sugerencias de reposicion" {
+
+    ' Nodo invisible para dar margen derecho
+    class "                                 " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    ' Líneas de vida (rectángulos estándar UML 2.5)
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":EncargadoSucursal" as actor_encargado <<actor>>
+    class ":InterfazAlertas" as ui_alertas <<boundary>>
+    class ":ControladorAlertas" as ctrl_alertas <<control>>
+    class ":ServicioInventarioInteligente" as svc_alertas <<control>>
+    class ":Inventario" as ent_inventario <<entity>>
+    class ":MovimientoInventario" as ent_movimiento <<entity>>
+    class ":VentaDetalle" as ent_venta_detalle <<entity>>
+    class ":ProductoVariante" as ent_variante <<entity>>
+    class ":Sucursal" as ent_sucursal <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 1: actor y frontera de interacción                          '
+    ' ------------------------------------------------------------------ '
+    actor_admin -down- ui_alertas : "1: IngresarAlertasReposicion() >\n< 11: MostrarAlertasSugerencias(alertas, total)\n12: CerrarConsulta()"
+
+    actor_encargado -down- ui_alertas : "1: IngresarAlertasReposicion() >\n< 11: MostrarAlertasSugerencias(alertas, total)\n12: CerrarConsulta()"
+
+    ui_alertas -down- ctrl_alertas : "2: AbrirAlertas(JWT, sucursal_id, umbral, fecha_desde, fecha_hasta) >\n< 11: AlertasPage\n4: ConsultarAlertas(sucursal_id, umbral, fecha_desde, fecha_hasta) >\n< 11: AlertasPage"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 2: controlador, servicio y validación de empresa            '
+    ' ------------------------------------------------------------------ '
+    ctrl_alertas -right- svc_alertas : "4: CalcularAlertas(sucursal_id, umbral, fecha_desde, fecha_hasta, empresa_id) >\n< 10: Alertas ordenadas por prioridad"
+
+    ctrl_alertas -down- ent_empresa : "2: require_roles(Administrador, EncargadoSucursal) + empresa activa >\n< Empresa activa"
+
+    ctrl_alertas -down- ent_sucursal : "3: ValidarSucursal(sucursal_id, empresa_id) / Encargado sucursal_permitida >\n< Sucursal válida"
+
+    ' ------------------------------------------------------------------ '
+    ' Nivel 3: entidades y validaciones del tenant                      '
+    ' ------------------------------------------------------------------ '
+    svc_alertas -down- ent_inventario : "5: ConsultarInventario(empresa_id, sucursal_id, umbral, q) >\n< Existencias (disponible, reservada)\n6: IdentificarStockBajo(disponible <= umbral) >\n< AGOTADO / STOCK_BAJO\n9: CalcularDiasStock(disponible, demanda_diaria) >\n< dias_restantes\n9: CalcularSugerencia(horizonte 30 dias, disponible, demanda_diaria) >\n< cantidad_a_reponer"
+
+    svc_alertas -down- ent_movimiento : "5: ConsultarMovimientos(variante_id, sucursal_id, fecha_desde, fecha_hasta) >\n< Historial CU13/CU14"
+
+    svc_alertas -down- ent_venta_detalle : "7: CalcularRotacion(variante_id, fecha_desde, fecha_hasta) >\n< unidades_vendidas_periodo\n8: CalcularDemandaDiaria(unidades_periodo / dias_periodo) >\n< demanda_diaria"
+
+    svc_alertas -down- ent_variante : "5: ConsultarVariantes(empresa_id) >\n< Producto, Talla, Color, SKU"
+
+    ' ------------------------------------------------------------------ '
+    ' NIVEL ALTERNATIVO: Flujos A1-A8                                  '
+    ' ------------------------------------------------------------------ '
+    alt A1: Sin alertas / A7: Filtro sin resultados
+        ctrl_alertas -> ui_alertas : A1/A7-1: total=0 >\n< MostrarListaVacia()
+    else A2: Sin historial de ventas
+        svc_alertas -> ctrl_alertas : A2-1: unidades_periodo=0 >\n< Solo umbral fijo <=3, sin prediccion
+    else A3: Sucursal invalida o de otra empresa
+        ctrl_alertas -> ui_alertas : A3-1: 404 Sucursal no encontrada >\n< MostrarError()
+    else A4: Encargado sin sucursal asignada
+        ctrl_alertas -> ui_alertas : A4-1: 409 Sin sucursal asignada >\n< MostrarErrorSucursal()
+    else A5: Sin permiso
+        ctrl_alertas -> ui_alertas : A5-1: 403 Sin permiso para alertas >\n< MostrarErrorPermiso()
+    else A6: Parametros invalidos
+        ctrl_alertas -> ui_alertas : A6-1: 422 Umbral negativo / fechas invalidas >\n< MostrarErrorValidacion()
+    else A8: Error de servicio
+        ctrl_alertas -> ui_alertas : A8-1: 500 Error base de datos >\n< MostrarErrorServicio()
+
+    ' Margen derecho
+    ent_empresa -[hidden]right-> espaciadorDerecha
+}
+
+@enduml
