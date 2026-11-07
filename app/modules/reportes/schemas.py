@@ -1,9 +1,20 @@
-"""Esquemas del módulo Reportes — CU31 (reportes de ventas e inventario)."""
+"""Esquemas del módulo Reportes — CU31 (reportes de ventas e inventario) y CU30 (exportación Excel/PDF)."""
 
 from datetime import date
 from decimal import Decimal
+from enum import Enum
 
 from pydantic import BaseModel
+
+
+class TipoReporteExportacion(str, Enum):
+    VENTAS = "ventas"
+    INVENTARIO = "inventario"
+
+
+class FormatoExportacion(str, Enum):
+    XLSX = "xlsx"
+    PDF = "pdf"
 
 
 class SucursalVentasOut(BaseModel):

@@ -1,0 +1,72 @@
+@startuml
+skinparam style strictuml
+skinparam handwritten false
+skinparam shadowing false
+skinparam backgroundColor #FFFFFF
+
+skinparam defaultFontName "Segoe UI"
+skinparam defaultFontSize 11
+skinparam linetype polyline
+
+skinparam frameMargin 60
+skinparam nodesep 200
+skinparam ranksep 100
+
+hide members
+hide circle
+
+skinparam class {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+    HeaderBackgroundColor #FFFFFF
+}
+
+skinparam frame {
+    BorderColor #000000
+    BackgroundColor #FFFFFF
+}
+
+frame "sd CU30 Exportar reporte dinámico a Excel o PDF" {
+
+    class " " as espaciadorDerecha <<invisible>>
+    hide espaciadorDerecha
+
+    class ":AdministradorEmpresa" as actor_admin <<actor>>
+    class ":InterfazReportes" as ui_reportes <<boundary>>
+    class ":ControladorReportes" as ctrl_reportes <<control>>
+    class ":ServicioReportes" as svc_reportes <<control>>
+    class ":Venta" as ent_venta <<entity>>
+    class ":Inventario" as ent_inventario <<entity>>
+    class ":Empresa" as ent_empresa <<entity>>
+    class ":GeneradorReporte" as svc_generador <<control>>
+    class ":ReporteGenerado" as ent_reporte_generado <<entity>>
+
+    ' Nivel 1: actor y frontera de interacción
+    actor_admin -down- ui_reportes : "1 SeleccionarReporte(tipo) >\n< 8 MostrarFiltros()\n9 DefinirFiltros(fechaDesde, fechaHasta, sucursalId, umbral, formato) >\n< 20 DescargarArchivo(xlsx/pdf)()"
+
+    ui_reportes -down- ctrl_reportes : "2 AbrirReportes(JWT) >\n< 7 FiltrosDisponibles\n10 SolicitarExportacion(tipo, filtros, formato) >\n< 19 ArchivoStream(xlsx/pdf)"
+
+    ' Nivel 2: controlador, servicio y validación de empresa y plan
+    ctrl_reportes -right- svc_reportes : "4 ValidarReporte(empresaId, sucursalId) >\n< Válido\n11 GenerarReporte(tipo, filtros, formato, empresaId) >\n< 18 ReporteBinario"
+
+    ctrl_reportes -down- ent_empresa : "3 require_roles(Administrador) + validar_acceso_plan(REPORTES_CONVENCIONALES) >\n< Empresa activa + plan activo"
+
+    ctrl_reportes -down- ent_empresa : "3.1 Si sucursalId=null: validar_acceso_plan(REPORTES_MULTISUCURSAL) >\n< Multisucursal permitido"
+
+    ' Nivel 3: entidades, cálculo de totales y generación de archivo
+    svc_reportes -down- ent_venta : "5 ConsultarVentas(empresaId, filtros) >\n< Ventas filtradas\nCalcula ingresos, costo y ganancia neta"
+
+    svc_reportes -down- ent_inventario : "6 ConsultarInventario(empresaId, filtros, umbral) >\n< Stock por variante\nCalcula valor de inventario y stock bajo"
+
+    svc_reportes -down- svc_generador : "12 GenerarExcel(datos, filtros) / GenerarPDF(datos, filtros) >\n< ArchivoBinario(xlsx)\n< ArchivoBinario(pdf)"
+
+    svc_reportes -down- ent_reporte_generado : "13 RegistrarReporte(tipo, parametros, formato) >\n< ReporteGenerado guardado"
+
+    svc_reportes -right- ctrl_reportes : "14 ReporteBinario >\n< 18 Archivo xlsx/pdf"
+    ctrl_reportes -right- ui_reportes : "15 ArchivoStream >\n< 19 Descarga navegador"
+    ui_reportes -down- actor_admin : "16 DescargarArchivo(xlsx/pdf) >\n< 20 ConfirmarDescarga()"
+
+    ent_reporte_generado -[hidden]right-> espaciadorDerecha
+}
+
+@enduml

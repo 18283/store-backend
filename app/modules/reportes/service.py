@@ -1,12 +1,15 @@
-"""Lógica de negocio del módulo Reportes — CU31 (RF24).
+"""Lógica de negocio del módulo Reportes — CU30/CU31.
 
 Reportes calculados directamente de la base de datos (sin IA): ventas
 (ingresos, costo, ganancia) e inventario (stock y valor). Cada generación
-queda registrada en `reporte_generado` con formato FORMULARIO.
+queda registrada en `reporte_generado`. CU30 agrega la exportación binaria
+de esos reportes a Excel (.xlsx) o PDF.
 """
 
+import io
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from fastapi import HTTPException, status
 from sqlmodel import Session, func, select
@@ -17,6 +20,12 @@ from app.modules.inventario.models import Inventario
 from app.modules.productos.models import Producto, ProductoVariante
 from app.modules.sucursales.models import Sucursal
 from app.modules.ventas.models import EstadoPago, EstadoVenta, Pago, Venta, VentaDetalle
+
+TipoExportacion = Literal["ventas", "inventario"]
+FormatoExportacion = Literal["xlsx", "pdf"]
+
+MEDIA_TYPE_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+MEDIA_TYPE_PDF = "application/pdf"
 
 ESTADOS_PAGADOS = (EstadoVenta.PAGADA, EstadoVenta.COMPLETADA)
 _BOLIVIA = timezone(timedelta(hours=-4))
@@ -42,13 +51,17 @@ def _sucursal_o_error(
 
 
 def _registrar(
-    session: Session, usuario_id: int, tipo: str, parametros: dict
+    session: Session,
+    usuario_id: int,
+    tipo: str,
+    parametros: dict,
+    formato: str = FormatoSolicitud.FORMULARIO,
 ) -> None:
     session.add(
         ReporteGenerado(
             usuario_id=usuario_id,
             tipo_reporte=tipo,
-            formato_solicitud=FormatoSolicitud.FORMULARIO,
+            formato_solicitud=formato,
             parametros=parametros,
         )
     )
@@ -305,3 +318,217 @@ def reporte_inventario(
         {"sucursal": sucursal.nombre if sucursal else None, "umbral": umbral},
     )
     return resultado
+
+
+# --------------------------------------------------------------------------- #
+#  CU30 — Exportación dinámica a Excel o PDF
+# --------------------------------------------------------------------------- #
+def _texto(valor: object) -> str:
+    if valor is None:
+        return ""
+    if isinstance(valor, Decimal):
+        return f"{valor:.2f}"
+    if isinstance(valor, bool):
+        return "Sí" if valor else "No"
+    return str(valor)
+
+
+def _encabezado_ventas(datos: dict) -> list[str]:
+    return [
+        "Reporte de Ventas",
+        f"Sucursal: {datos.get('sucursal')}",
+        f"Periodo: {datos.get('fecha_desde')} al {datos.get('fecha_hasta')}",
+        f"Generado: {datetime.now(_BOLIVIA).strftime('%Y-%m-%d %H:%M')}",
+    ]
+
+
+def _encabezado_inventario(datos: dict) -> list[str]:
+    return [
+        "Reporte de Inventario",
+        f"Sucursal: {datos.get('sucursal')}",
+        f"Umbral stock bajo: {datos.get('umbral')}",
+        f"Generado: {datetime.now(_BOLIVIA).strftime('%Y-%m-%d %H:%M')}",
+    ]
+
+
+def _filas_ventas(datos: dict) -> tuple[list[str], list[list[str]]]:
+    header = [
+        "Sucursal", "Cantidad ventas", "Ingresos",
+        "Producto", "Unidades", "Ingresos producto",
+    ]
+    filas: list[list[str]] = []
+    por_sucursal = datos.get("por_sucursal") or []
+    top = datos.get("top_productos") or []
+    max_filas = max(len(por_sucursal), len(top))
+    if max_filas == 0:
+        filas.append(["Sin resultados para los filtros seleccionados", "", "", "", "", ""])
+    for i in range(max_filas):
+        suc = por_sucursal[i] if i < len(por_sucursal) else {}
+        prod = top[i] if i < len(top) else {}
+        filas.append([
+            _texto(suc.get("sucursal")),
+            _texto(suc.get("cantidad_ventas")),
+            _texto(suc.get("ingresos")),
+            _texto(prod.get("nombre")),
+            _texto(prod.get("unidades")),
+            _texto(prod.get("ingresos")),
+        ])
+    filas.append([])
+    filas.append(["Resumen", "", "", "", "", ""])
+    filas.append(["Cantidad ventas", _texto(datos.get("cantidad_ventas")), "", "", "", ""])
+    filas.append(["Unidades", _texto(datos.get("unidades")), "", "", "", ""])
+    filas.append(["Ingresos", _texto(datos.get("ingresos")), "", "", "", ""])
+    filas.append(["Costo", _texto(datos.get("costo")), "", "", "", ""])
+    filas.append(["Ganancia", _texto(datos.get("ganancia")), "", "", "", ""])
+    filas.append(["Descuentos", _texto(datos.get("descuentos")), "", "", "", ""])
+    filas.append(["Ticket promedio", _texto(datos.get("ticket_promedio")), "", "", "", ""])
+    filas.append(["Egresos reembolsos", _texto(datos.get("egresos_reembolsos")), "", "", "", ""])
+    return header, filas
+
+
+def _filas_inventario(datos: dict) -> tuple[list[str], list[list[str]]]:
+    header = [
+        "Producto", "Talla", "Color", "Sucursal",
+        "Disponible", "Reservada", "Costo prom.", "Valor", "Stock bajo",
+    ]
+    items = datos.get("items") or []
+    filas: list[list[str]] = []
+    if not items:
+        filas.append(["Sin resultados para los filtros seleccionados"] + [""] * 8)
+    for item in items:
+        filas.append([
+            _texto(item.get("producto")),
+            _texto(item.get("talla")),
+            _texto(item.get("color")),
+            _texto(item.get("sucursal")),
+            _texto(item.get("disponible")),
+            _texto(item.get("reservada")),
+            _texto(item.get("costo_promedio")),
+            _texto(item.get("valor")),
+            _texto(item.get("stock_bajo")),
+        ])
+    filas.append([])
+    filas.append(["Resumen", "", "", "", "", "", "", "", ""])
+    filas.append(["Total variantes", _texto(datos.get("total_variantes")), "", "", "", "", "", "", ""])
+    filas.append(["Unidades disponibles", _texto(datos.get("unidades_disponibles")), "", "", "", "", "", "", ""])
+    filas.append(["Unidades reservadas", _texto(datos.get("unidades_reservadas")), "", "", "", "", "", "", ""])
+    filas.append(["Valor inventario", _texto(datos.get("valor_inventario")), "", "", "", "", "", "", ""])
+    filas.append(["Variantes stock bajo", _texto(datos.get("variantes_stock_bajo")), "", "", "", "", "", "", ""])
+    return header, filas
+
+
+def _generar_xlsx(encabezado: list[str], header: list[str], filas: list[list[str]]) -> bytes:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reporte"
+    for linea in encabezado:
+        ws.append([linea])
+    ws.append([])
+    ws.append(header)
+    for fila in filas:
+        ws.append(fila)
+    for col in ws.columns:
+        max_len = max(len(str(c.value)) if c.value is not None else 0 for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _generar_pdf(encabezado: list[str], header: list[str], filas: list[list[str]]) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24,
+    )
+    data = [[linea] for linea in encabezado]
+    data.append([])
+    data.append(header)
+    data.extend(filas)
+    # reportlab no acepta filas vacías con distinto largo en todas las versiones
+    data = [f if f else [""] * len(header) for f in data]
+    table = Table(data, repeatRows=len(encabezado) + 2)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, len(encabezado) + 1), (-1, len(encabezado) + 1), colors.lightgrey),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    doc.build([table])
+    return buf.getvalue()
+
+
+def exportar_reporte(
+    session: Session,
+    admin_id: int,
+    tipo_reporte: str,
+    formato: str,
+    *,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+    sucursal_id: int | None = None,
+    umbral: int = 3,
+    empresa_id: int | None = None,
+) -> tuple[bytes, str, str]:
+    """CU30 — Exporta un reporte dinámico (ventas/inventario) a Excel o PDF.
+
+    Reutiliza los cálculos de CU31 (reporte_ventas / reporte_inventario),
+    genera el archivo binario y registra la exportación en reporte_generado.
+
+    Retorna (contenido, nombre_archivo, media_type).
+    """
+    tipo = (tipo_reporte or "").strip().lower()
+    fmt = (formato or "").strip().lower()
+
+    # A6 — Error de formato (incluye tipo de reporte)
+    if tipo not in ("ventas", "inventario"):
+        raise HTTPException(400, "Tipo de reporte inválido. Use 'ventas' o 'inventario'.")
+    if fmt not in ("xlsx", "pdf"):
+        raise HTTPException(400, "Formato inválido. Use 'xlsx' (Excel) o 'pdf'.")
+
+    hoy = datetime.now(_BOLIVIA).date()
+    if tipo == "ventas":
+        datos = reporte_ventas(session, admin_id, fecha_desde, fecha_hasta, sucursal_id, empresa_id=empresa_id)
+        encabezado = _encabezado_ventas(datos)
+        header, filas = _filas_ventas(datos)
+        nombre_base = f"reporte_ventas_{datos['fecha_desde']}_al_{datos['fecha_hasta']}"
+        params = {
+            "fecha_desde": datos["fecha_desde"].isoformat(),
+            "fecha_hasta": datos["fecha_hasta"].isoformat(),
+            "sucursal": datos["sucursal"],
+            "formato": fmt,
+        }
+        tipo_registro = TipoReporte.VENTAS
+    else:
+        datos = reporte_inventario(session, admin_id, sucursal_id, umbral, empresa_id=empresa_id)
+        encabezado = _encabezado_inventario(datos)
+        header, filas = _filas_inventario(datos)
+        nombre_base = "reporte_inventario"
+        params = {"sucursal": datos["sucursal"], "umbral": umbral, "formato": fmt}
+        tipo_registro = TipoReporte.INVENTARIO
+
+    if fmt == "xlsx":
+        contenido = _generar_xlsx(encabezado, header, filas)
+        media_type = MEDIA_TYPE_XLSX
+        extension = "xlsx"
+    else:
+        contenido = _generar_pdf(encabezado, header, filas)
+        media_type = MEDIA_TYPE_PDF
+        extension = "pdf"
+
+    _registrar(
+        session,
+        admin_id,
+        tipo_registro,
+        params,
+        formato="XLSX" if fmt == "xlsx" else "PDF",
+    )
+    nombre_archivo = f"{nombre_base}.{extension}"
+    return contenido, nombre_archivo, media_type
