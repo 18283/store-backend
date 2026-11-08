@@ -859,39 +859,14 @@ def confirmar_reembolso_efectivo(
         raise HTTPException(409, "Este reembolso ya fue confirmado")
 
     pago = session.get(Pago, reembolso.pago_id)
-    detalles = session.exec(
-        select(VentaDetalle).where(VentaDetalle.venta_id == venta.id)
-    ).all()
 
+    # OJO: a diferencia de un cambio/devolución normal (CU17/19/20), esta
+    # venta quedó ANULADA al sincronizar — su stock NUNCA se descontó (ver
+    # `sincronizar_venta_efectivo`, rama `not alcanza`). La prenda que el
+    # cliente devuelve es físicamente la misma que ya le "ganó" el otro
+    # cliente/venta que sí tiene el stock reservado; no hay nada que sumar
+    # de vuelta al inventario acá, sumar sería duplicar esa unidad.
     ahora = datetime.now(timezone.utc)
-    for detalle in detalles:
-        if detalle.sucursal_id is None:
-            continue
-        inv = session.exec(
-            select(Inventario).where(
-                Inventario.variante_id == detalle.variante_id,
-                Inventario.sucursal_id == detalle.sucursal_id,
-            )
-        ).first()
-        if inv is None:
-            inv = Inventario(
-                variante_id=detalle.variante_id,
-                sucursal_id=detalle.sucursal_id,
-                cantidad_disponible=0,
-                cantidad_reservada=0,
-            )
-        inv.cantidad_disponible += detalle.cantidad
-        session.add(inv)
-        session.add(
-            MovimientoInventario(
-                variante_id=detalle.variante_id,
-                sucursal_id=detalle.sucursal_id,
-                usuario_id=cajero.id,
-                tipo=TipoMovimiento.DEVOLUCION_CLIENTE,
-                cantidad=detalle.cantidad,
-                nota=f"Devolución de efectivo #{reembolso.id} (venta #{venta.id})",
-            )
-        )
 
     reembolso.estado = EstadoReembolsoEfectivo.ENTREGADO
     reembolso.cajero_confirma_id = cajero.id
