@@ -36,6 +36,7 @@ from .models import (
     TipoOperacionOffline,
 )
 from .schemas import (
+    ClienteOfflineOut,
     ConfirmarReembolsoEfectivoIn,
     DatosOfflineOut,
     DispositivoPushIn,
@@ -76,6 +77,44 @@ def _sucursal_autorizada(
     ):
         raise HTTPException(404, "Sucursal no encontrada para esta empresa")
     return sucursal
+
+
+def _clientes_para_offline(session: Session, usuario: Usuario) -> list[ClienteOfflineOut]:
+    """CU12 (Cajero) — solo el personal de staff necesita elegir un cliente
+    presencial para la venta en efectivo; no se expone la lista de clientes
+    en la copia offline de un Cliente (seria filtrar datos de otros)."""
+    rol = session.get(Rol, usuario.rol_id)
+    if rol is None or rol.nombre not in (
+        RolNombre.ADMINISTRADOR,
+        RolNombre.ENCARGADO,
+        RolNombre.CAJERO,
+    ):
+        return []
+    rol_cliente = session.exec(
+        select(Rol).where(Rol.nombre == RolNombre.CLIENTE)
+    ).first()
+    if rol_cliente is None:
+        return []
+    clientes = session.exec(
+        select(Usuario)
+        .where(
+            Usuario.rol_id == rol_cliente.id,
+            Usuario.empresa_id == usuario.empresa_id,
+            Usuario.activo == True,  # noqa: E712
+        )
+        .order_by(Usuario.nombre)
+        .limit(500)
+    ).all()
+    return [
+        ClienteOfflineOut(
+            id=c.id,
+            nombre=c.nombre,
+            apellido=c.apellido,
+            email=c.email,
+            telefono=c.telefono,
+        )
+        for c in clientes
+    ]
 
 
 def preparar_datos(
@@ -135,6 +174,7 @@ def preparar_datos(
     ahora = datetime.now(timezone.utc)
     lista = list(productos.values())
     total_variantes = sum(len(item.variantes) for item in lista)
+    clientes = _clientes_para_offline(session, usuario)
     resultado = DatosOfflineOut(
         version_datos=f"1-{usuario.empresa_id}-{sucursal.id}-{int(ahora.timestamp())}",
         empresa_id=usuario.empresa_id,
@@ -144,6 +184,8 @@ def preparar_datos(
         productos=lista,
         total_productos=len(lista),
         total_variantes=total_variantes,
+        clientes=clientes,
+        total_clientes=len(clientes),
     )
     # CU35 — Avisar sincronización del catálogo offline (opcional).
     from app.modules.traspasos.notificacion_service import crear_notificacion_segura

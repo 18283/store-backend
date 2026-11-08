@@ -29,6 +29,17 @@ class ProductoOfflineOut(BaseModel):
     variantes: list[VarianteOfflineOut]
 
 
+class ClienteOfflineOut(BaseModel):
+    """CU12 (Cajero) — clientes de la empresa, cacheados en el dispositivo
+    para poder buscar/elegir uno sin conexión al armar una venta en efectivo."""
+
+    id: int
+    nombre: str
+    apellido: str
+    email: str
+    telefono: str | None
+
+
 class DatosOfflineOut(BaseModel):
     schema_version: int = 1
     version_datos: str
@@ -39,6 +50,8 @@ class DatosOfflineOut(BaseModel):
     productos: list[ProductoOfflineOut]
     total_productos: int
     total_variantes: int
+    clientes: list[ClienteOfflineOut] = []
+    total_clientes: int = 0
 
 
 # --------------------------------------------------------------------------- #
