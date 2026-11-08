@@ -67,6 +67,19 @@ class SincronizarVentaIn(BaseModel):
     creado_en_dispositivo: datetime
 
 
+# --------------------------------------------------------------------------- #
+#  CU12/CU14 — Venta de contado en EFECTIVO del Cajero, registrada sin
+#  conexión (cliente presencial, sin tarjeta guardada: el pago ya se cobró
+#  físicamente antes de sincronizar).
+# --------------------------------------------------------------------------- #
+class SincronizarVentaEfectivoIn(BaseModel):
+    clave_idempotencia: str = Field(min_length=10, max_length=80)
+    cliente_id: int = Field(description="Cliente presencial, buscado/creado antes de armar la venta")
+    items: list[ItemOfflineIn] = Field(min_length=1, max_length=20)
+    monto_recibido: Decimal = Field(gt=0)
+    creado_en_dispositivo: datetime
+
+
 class ResultadoSincronizacionOut(BaseModel):
     clave_idempotencia: str
     tipo: str  # RESERVA | VENTA
@@ -82,3 +95,28 @@ class ResultadoSincronizacionOut(BaseModel):
 class DispositivoPushIn(BaseModel):
     token: str = Field(min_length=10, max_length=255)
     plataforma: str = Field(description="ANDROID o WEB")
+
+
+# --------------------------------------------------------------------------- #
+#  CU16 — Devolución de efectivo pendiente (conflicto de una venta offline
+#  en efectivo) y su confirmación por el Cajero.
+# --------------------------------------------------------------------------- #
+class ReembolsoEfectivoOut(BaseModel):
+    id: int
+    venta_id: int
+    cliente_nombre: str
+    sucursal_id: int
+    sucursal: str
+    monto: Decimal
+    estado: str
+    fecha_creacion: datetime
+    fecha_entregado: datetime | None
+
+
+class ReembolsoEfectivoPage(BaseModel):
+    items: list[ReembolsoEfectivoOut]
+    total: int
+
+
+class ConfirmarReembolsoEfectivoIn(BaseModel):
+    nota: str | None = Field(default=None, max_length=255)

@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.core import push
 from app.modules.catalogo.models import Categoria, Color, Talla
-from app.modules.identidad.models import Usuario
+from app.modules.identidad.models import Rol, RolNombre, Usuario
 from app.modules.inventario.models import Inventario, MovimientoInventario, TipoMovimiento
 from app.modules.productos.models import Producto, ProductoVariante
 from app.modules.reservas import service as reservas_service
@@ -27,13 +27,23 @@ from app.modules.ventas.models import (
     VentaDetalle,
 )
 
-from .models import DispositivoPush, EstadoOperacionOffline, OperacionSincronizada, TipoOperacionOffline
+from .models import (
+    DispositivoPush,
+    EstadoOperacionOffline,
+    EstadoReembolsoEfectivo,
+    OperacionSincronizada,
+    ReembolsoEfectivo,
+    TipoOperacionOffline,
+)
 from .schemas import (
+    ConfirmarReembolsoEfectivoIn,
     DatosOfflineOut,
     DispositivoPushIn,
     ProductoOfflineOut,
+    ReembolsoEfectivoOut,
     ResultadoSincronizacionOut,
     SincronizarReservaIn,
+    SincronizarVentaEfectivoIn,
     SincronizarVentaIn,
     VarianteOfflineOut,
 )
@@ -550,3 +560,320 @@ def sincronizar_venta(
         modulo="sincronizacion",
     )
     return _resultado_de(op)
+
+
+# --------------------------------------------------------------------------- #
+#  CU12/CU14 — Sincronizar una venta de contado EN EFECTIVO del Cajero
+#  (cliente presencial, sin tarjeta guardada).
+# --------------------------------------------------------------------------- #
+def sincronizar_venta_efectivo(
+    session: Session, cajero: Usuario, data: SincronizarVentaEfectivoIn
+) -> ResultadoSincronizacionOut:
+    existente = _buscar_operacion(session, data.clave_idempotencia)
+    if existente is not None:
+        return _resultado_de(existente)
+
+    _exigir_acceso_offline(session, cajero)
+    sucursal_id = ventas_service._sucursal_del_cajero(cajero)
+
+    def _rechazar(motivo: str, venta_id: int | None = None) -> ResultadoSincronizacionOut:
+        op = _registrar_operacion(
+            session,
+            cajero.id,
+            TipoOperacionOffline.VENTA,
+            data.clave_idempotencia,
+            EstadoOperacionOffline.RECHAZADO,
+            venta_id=venta_id,
+            motivo_rechazo=motivo,
+        )
+        push.enviar_push_a_usuario(
+            session, cajero.id, "No se pudo registrar la venta", motivo, {"tipo": "venta"}
+        )
+        from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+        crear_notificacion_segura(
+            session=session,
+            usuario_id=cajero.id,
+            mensaje=f"No se pudo registrar la venta en efectivo sincronizada: {motivo}",
+            tipo="warning",
+            modulo="sincronizacion",
+        )
+        return _resultado_de(op)
+
+    rol_cliente = session.exec(select(Rol).where(Rol.nombre == RolNombre.CLIENTE)).first()
+    cliente = session.get(Usuario, data.cliente_id)
+    if (
+        cliente is None
+        or (rol_cliente and cliente.rol_id != rol_cliente.id)
+        or cliente.empresa_id != cajero.empresa_id
+    ):
+        return _rechazar("El cliente indicado no existe.")
+
+    pedidos: list[tuple[ProductoVariante, Producto, int]] = []
+    for item in data.items:
+        variante = session.get(ProductoVariante, item.variante_id)
+        if variante is None:
+            return _rechazar("Una de las prendas de la venta ya no existe.")
+        producto = session.get(Producto, variante.producto_id)
+        if producto is None or not producto.activo or producto.precio_base is None:
+            nombre = producto.nombre if producto else variante.sku
+            return _rechazar(f"'{nombre}' ya no está disponible.")
+        pedidos.append((variante, producto, item.cantidad))
+
+    precios = {v.id: ventas_service._precio_venta(session, v, p) for v, p, _ in pedidos}
+    total = sum((precios[v.id][1] * cantidad for v, _, cantidad in pedidos), Decimal(0))
+
+    if data.monto_recibido < total:
+        return _rechazar("El monto recibido es menor al total de la venta.")
+
+    # El efectivo ya se cobró físicamente en el mostrador, antes de que
+    # volviera la conexión — a diferencia de Stripe, acá NO hay nada que
+    # cobrar ahora. Lo único que falta es ver si todavía hay stock real en
+    # el servidor para esta sucursal (filas bloqueadas, como en CU14).
+    inventarios: dict[int, Inventario] = {}
+    alcanza = True
+    for variante, _, cantidad in pedidos:
+        inv = session.exec(
+            select(Inventario)
+            .where(
+                Inventario.variante_id == variante.id,
+                Inventario.sucursal_id == sucursal_id,
+            )
+            .with_for_update()
+        ).first()
+        inventarios[variante.id] = inv
+        if inv is None or inv.cantidad_disponible < cantidad:
+            alcanza = False
+
+    venta = Venta(
+        cliente_id=cliente.id,
+        sucursal_id=sucursal_id,
+        cajero_id=cajero.id,
+        total=total,
+        origen=OrigenVenta.OFFLINE,
+        estado=EstadoVenta.PAGADA if alcanza else EstadoVenta.ANULADA,
+    )
+    session.add(venta)
+    session.flush()
+
+    # Se deja constancia de las líneas aunque la venta se anule: es la
+    # única forma de saber qué prenda(s) hay que recuperar cuando el cliente
+    # vuelva a devolverlas (CU16/CU21).
+    for variante, _, cantidad in pedidos:
+        original, precio, promocion_id = precios[variante.id]
+        inv = inventarios[variante.id]
+        session.add(
+            VentaDetalle(
+                venta_id=venta.id,
+                variante_id=variante.id,
+                sucursal_id=sucursal_id,
+                cantidad=cantidad,
+                precio_unitario=precio,
+                precio_original=original,
+                promocion_id=promocion_id,
+                costo_unitario=inv.costo_promedio if inv else None,
+            )
+        )
+        if alcanza and inv is not None:
+            inv.cantidad_disponible -= cantidad
+            session.add(inv)
+            session.add(
+                MovimientoInventario(
+                    variante_id=variante.id,
+                    sucursal_id=sucursal_id,
+                    usuario_id=cajero.id,
+                    tipo=TipoMovimiento.SALIDA_VENTA,
+                    cantidad=cantidad,
+                    nota=f"Venta offline en efectivo #{venta.id}",
+                )
+            )
+
+    vuelto = data.monto_recibido - total
+
+    if not alcanza:
+        pago = Pago(
+            venta_id=venta.id,
+            metodo=MetodoPago.EFECTIVO,
+            estado=EstadoPago.PENDIENTE_REEMBOLSO,
+            monto=total,
+            monto_recibido=data.monto_recibido,
+            vuelto=vuelto,
+        )
+        session.add(pago)
+        session.flush()
+        session.add(
+            ReembolsoEfectivo(
+                venta_id=venta.id,
+                pago_id=pago.id,
+                monto=total,
+            )
+        )
+        session.commit()
+        return _rechazar(
+            "Otro cliente se adelantó y ya no había stock. El cliente debe "
+            "devolver la prenda en la sucursal para que se le devuelva el efectivo.",
+            venta_id=venta.id,
+        )
+
+    pago = Pago(
+        venta_id=venta.id,
+        metodo=MetodoPago.EFECTIVO,
+        estado=EstadoPago.APROBADO,
+        monto=total,
+        monto_recibido=data.monto_recibido,
+        vuelto=vuelto,
+    )
+    session.add(pago)
+    session.commit()
+    session.refresh(venta)
+
+    op = _registrar_operacion(
+        session,
+        cajero.id,
+        TipoOperacionOffline.VENTA,
+        data.clave_idempotencia,
+        EstadoOperacionOffline.CONFIRMADO,
+        venta_id=venta.id,
+    )
+    push.enviar_push_a_usuario(
+        session,
+        cajero.id,
+        "Venta confirmada",
+        "La venta en efectivo registrada sin conexión se confirmó correctamente.",
+        {"tipo": "venta", "venta_id": str(venta.id)},
+    )
+    from app.modules.traspasos.notificacion_service import crear_notificacion_segura
+
+    crear_notificacion_segura(
+        session=session,
+        usuario_id=cajero.id,
+        mensaje="La venta en efectivo registrada sin conexión se confirmó correctamente.",
+        tipo="success",
+        modulo="sincronizacion",
+    )
+    return _resultado_de(op)
+
+
+# --------------------------------------------------------------------------- #
+#  CU16 — Consultar y confirmar devoluciones de efectivo pendientes
+# --------------------------------------------------------------------------- #
+def listar_reembolsos_pendientes(
+    session: Session,
+    *,
+    sucursal_permitida: int | None,
+    empresa_id: int | None,
+) -> list[ReembolsoEfectivoOut]:
+    query = (
+        select(ReembolsoEfectivo, Venta, Usuario, Sucursal)
+        .join(Venta, Venta.id == ReembolsoEfectivo.venta_id)
+        .join(Usuario, Usuario.id == Venta.cliente_id)
+        .join(Sucursal, Sucursal.id == Venta.sucursal_id)
+        .where(ReembolsoEfectivo.estado == EstadoReembolsoEfectivo.PENDIENTE)
+        .order_by(ReembolsoEfectivo.fecha_creacion)
+    )
+    if sucursal_permitida is not None:
+        query = query.where(Venta.sucursal_id == sucursal_permitida)
+    elif empresa_id is not None:
+        query = query.where(Sucursal.empresa_id == empresa_id)
+
+    filas = session.exec(query).all()
+    return [
+        ReembolsoEfectivoOut(
+            id=reembolso.id,
+            venta_id=venta.id,
+            cliente_nombre=f"{cliente.nombre} {cliente.apellido}",
+            sucursal_id=sucursal.id,
+            sucursal=sucursal.nombre,
+            monto=reembolso.monto,
+            estado=reembolso.estado,
+            fecha_creacion=reembolso.fecha_creacion,
+            fecha_entregado=reembolso.fecha_entregado,
+        )
+        for reembolso, venta, cliente, sucursal in filas
+    ]
+
+
+def confirmar_reembolso_efectivo(
+    session: Session,
+    cajero: Usuario,
+    reembolso_id: int,
+    data: ConfirmarReembolsoEfectivoIn,
+    *,
+    sucursal_permitida: int | None,
+    empresa_id: int | None,
+) -> ReembolsoEfectivoOut:
+    reembolso = session.get(ReembolsoEfectivo, reembolso_id)
+    if reembolso is None:
+        raise HTTPException(404, "Reembolso no encontrado")
+    venta = session.get(Venta, reembolso.venta_id)
+    if venta is None:
+        raise HTTPException(404, "Venta no encontrada")
+    sucursal = session.get(Sucursal, venta.sucursal_id)
+    if empresa_id is not None and (sucursal is None or sucursal.empresa_id != empresa_id):
+        raise HTTPException(403, "Ese reembolso es de otra empresa")
+    if sucursal_permitida is not None and venta.sucursal_id != sucursal_permitida:
+        raise HTTPException(403, "Ese reembolso es de otra sucursal")
+    if reembolso.estado != EstadoReembolsoEfectivo.PENDIENTE:
+        raise HTTPException(409, "Este reembolso ya fue confirmado")
+
+    pago = session.get(Pago, reembolso.pago_id)
+    detalles = session.exec(
+        select(VentaDetalle).where(VentaDetalle.venta_id == venta.id)
+    ).all()
+
+    ahora = datetime.now(timezone.utc)
+    for detalle in detalles:
+        if detalle.sucursal_id is None:
+            continue
+        inv = session.exec(
+            select(Inventario).where(
+                Inventario.variante_id == detalle.variante_id,
+                Inventario.sucursal_id == detalle.sucursal_id,
+            )
+        ).first()
+        if inv is None:
+            inv = Inventario(
+                variante_id=detalle.variante_id,
+                sucursal_id=detalle.sucursal_id,
+                cantidad_disponible=0,
+                cantidad_reservada=0,
+            )
+        inv.cantidad_disponible += detalle.cantidad
+        session.add(inv)
+        session.add(
+            MovimientoInventario(
+                variante_id=detalle.variante_id,
+                sucursal_id=detalle.sucursal_id,
+                usuario_id=cajero.id,
+                tipo=TipoMovimiento.DEVOLUCION_CLIENTE,
+                cantidad=detalle.cantidad,
+                nota=f"Devolución de efectivo #{reembolso.id} (venta #{venta.id})",
+            )
+        )
+
+    reembolso.estado = EstadoReembolsoEfectivo.ENTREGADO
+    reembolso.cajero_confirma_id = cajero.id
+    reembolso.nota = data.nota
+    reembolso.fecha_entregado = ahora
+    session.add(reembolso)
+
+    if pago is not None:
+        pago.estado = EstadoPago.REEMBOLSADO
+        pago.fecha_reembolso = ahora
+        session.add(pago)
+
+    session.commit()
+    session.refresh(reembolso)
+
+    cliente = session.get(Usuario, venta.cliente_id)
+    return ReembolsoEfectivoOut(
+        id=reembolso.id,
+        venta_id=venta.id,
+        cliente_nombre=f"{cliente.nombre} {cliente.apellido}" if cliente else "",
+        sucursal_id=sucursal.id if sucursal else venta.sucursal_id,
+        sucursal=sucursal.nombre if sucursal else "",
+        monto=reembolso.monto,
+        estado=reembolso.estado,
+        fecha_creacion=reembolso.fecha_creacion,
+        fecha_entregado=reembolso.fecha_entregado,
+    )

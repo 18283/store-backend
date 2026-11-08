@@ -58,6 +58,11 @@ class EstadoPago:
     # CU14: se cobró (off-session, tarjeta guardada) pero al sincronizar ya
     # no había stock — se le devolvió el dinero al cliente.
     REEMBOLSADO = "REEMBOLSADO"
+    # CU16: venta offline en EFECTIVO del Cajero que al sincronizar ya no
+    # tenía stock. El efectivo ya está en caja (no se puede "revertir" solo);
+    # queda pendiente de devolver a mano (ver ReembolsoEfectivo) hasta que el
+    # Cajero confirma la entrega, momento en el que pasa a REEMBOLSADO.
+    PENDIENTE_REEMBOLSO = "PENDIENTE_REEMBOLSO"
 
 
 class MetodoPago:

@@ -7,6 +7,7 @@ duplica una reserva o una venta.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlmodel import Field, SQLModel
 
@@ -52,3 +53,37 @@ class DispositivoPush(SQLModel, table=True):
     fecha_registro: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+
+class EstadoReembolsoEfectivo:
+    PENDIENTE = "PENDIENTE"
+    ENTREGADO = "ENTREGADO"
+
+
+class ReembolsoEfectivo(SQLModel, table=True):
+    """CU16 — Devolución de efectivo pendiente.
+
+    Se crea cuando una venta de contado en EFECTIVO del Cajero (CU12), hecha
+    sin conexión, se rechaza al sincronizar (CU14) porque otra operación ya
+    se llevó el stock. El cajero ya tiene el efectivo en caja (lo cobró
+    físicamente antes de sincronizar) y el cliente ya se llevó la prenda: hay
+    que esperar a que el cliente vuelva a la sucursal, devolverle la prenda y
+    el efectivo en el mismo trámite, y recién ahí confirmarlo acá.
+    """
+
+    __tablename__ = "reembolso_efectivo"
+
+    id: int | None = Field(default=None, primary_key=True)
+    venta_id: int = Field(foreign_key="venta.id", unique=True)
+    pago_id: int = Field(foreign_key="pago.id")
+    monto: Decimal = Field(max_digits=10, decimal_places=2)
+    estado: str = Field(default=EstadoReembolsoEfectivo.PENDIENTE, max_length=20)
+
+    # Quien confirma la entrega del efectivo y recibe la prenda de vuelta.
+    cajero_confirma_id: int | None = Field(default=None, foreign_key="usuario.id")
+    nota: str | None = Field(default=None, max_length=255)
+
+    fecha_creacion: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+    fecha_entregado: datetime | None = Field(default=None)
